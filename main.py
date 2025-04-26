@@ -1,97 +1,92 @@
 import os
 import time
 import requests
-from binance.client import Client
-from binance.exceptions import BinanceAPIException
+import hmac
+import hashlib
 
-# === Configuración de entorno ===
-api_key = os.getenv('API_KEY')
-api_secret = os.getenv('SECRET_KEY')
-telegram_token = os.getenv('TELEGRAM_BOT_TOKEN')
-telegram_chat_id = os.getenv('CHAT_ID')
+# ENV VARS
+API_KEY = os.getenv("API_KEY")
+SECRET_KEY = os.getenv("SECRET_KEY")
+CHAT_ID = os.getenv("CHAT_ID")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
-client = Client(api_key, api_secret)
-symbol = 'SHIBUSDT'
-profit_target = 0.015  # 1.5%
-stop_loss_threshold = 0.02  # 2% pérdida
-percent_to_use = 0.80  # Usa el 80% del USDT disponible
+BINGX_API_URL = "https://open-api.bingx.com/openApi/swap/v2"
 
-# === Enviar mensaje por Telegram ===
-def notify(message):
-    url = f"https://api.telegram.org/bot{telegram_token}/sendMessage"
-    data = {'chat_id': telegram_chat_id, 'text': message}
-    try:
-        requests.post(url, data=data)
-    except Exception as e:
-        print(f"Error al enviar notificación: {e}")
+SYMBOL = "SHIB-USDT"
+TRADE_AMOUNT_PERCENTAGE = 0.8
+TAKE_PROFIT_PERCENT = 0.015
+STOP_LOSS_PERCENT = 0.02
 
-# === Obtener saldo disponible ===
-def get_usdt_balance():
-    try:
-        balance = client.get_asset_balance(asset='USDT')
-        return float(balance['free']) if balance else 0
-    except:
-        notify("Error al obtener saldo.")
-        return 0
+def send_telegram_message(message):
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": CHAT_ID,
+        "text": message
+    }
+    requests.post(url, data=payload)
 
-# === Obtener datos de análisis ===
-def get_market_data():
-    try:
-        candles = client.get_klines(symbol=symbol, interval=Client.KLINE_INTERVAL_1MINUTE, limit=10)
-        closes = [float(x[4]) for x in candles]
-        return closes
-    except Exception as e:
-        print(f"Error al obtener datos: {e}")
-        return []
+def get_server_time():
+    return str(int(time.time() * 1000))
 
-# === Detectar entrada ideal usando análisis básico ===
-def should_enter_trade(closes):
-    if len(closes) < 3:
-        return False
-    return closes[-1] > closes[-2] > closes[-3]  # Tendencia de 3 velas verdes
+def sign_request(params):
+    query = "&".join([f"{key}={params[key]}" for key in sorted(params)])
+    signature = hmac.new(SECRET_KEY.encode(), query.encode(), hashlib.sha256).hexdigest()
+    return signature
 
-# === Ejecutar operación ===
-def execute_trade():
-    usdt_balance = get_usdt_balance()
-    if usdt_balance < 1:
-        notify("Saldo insuficiente.")
-        return
+def get_balance():
+    endpoint = f"{BINGX_API_URL}/user/balance"
+    timestamp = get_server_time()
+    params = {
+        "apiKey": API_KEY,
+        "timestamp": timestamp
+    }
+    params["signature"] = sign_request(params)
+    response = requests.get(endpoint, params=params)
+    balance = float(response.json()["data"]["USDT"]["availableBalance"])
+    return balance
 
-    closes = get_market_data()
-    if not should_enter_trade(closes):
-        print("No hay oportunidad clara.")
-        return
+def get_price():
+    endpoint = f"{BINGX_API_URL}/quote/price"
+    response = requests.get(endpoint, params={"symbol": SYMBOL})
+    return float(response.json()["price"])
 
-    price = float(client.get_symbol_ticker(symbol=symbol)['price'])
-    quantity = (usdt_balance * percent_to_use) / price
-    quantity = round(quantity, 0)  # SHIB permite enteros
+def place_order(side, quantity):
+    endpoint = f"{BINGX_API_URL}/trade/order"
+    timestamp = get_server_time()
+    params = {
+        "apiKey": API_KEY,
+        "symbol": SYMBOL,
+        "side": side,
+        "positionSide": "LONG" if side == "BUY" else "SHORT",
+        "type": "MARKET",
+        "quantity": quantity,
+        "timestamp": timestamp
+    }
+    params["signature"] = sign_request(params)
+    response = requests.post(endpoint, data=params)
+    return response.json()
 
-    try:
-        buy_order = client.order_market_buy(symbol=symbol, quantity=quantity)
-        buy_price = float(buy_order['fills'][0]['price'])
-        notify(f"Compra ejecutada de {quantity} SHIB a {buy_price} USDT")
-        print("Esperando ganancia...")
+def main():
+    balance = get_balance()
+    investment = balance * TRADE_AMOUNT_PERCENTAGE
+    entry_price = get_price()
+    quantity = investment / entry_price
 
-        while True:
-            current_price = float(client.get_symbol_ticker(symbol=symbol)['price'])
-            change = (current_price - buy_price) / buy_price
+    send_telegram_message("Buscando entrada ideal para scalping en SHIB/USDT...")
 
-            if change >= profit_target:
-                sell_order = client.order_market_sell(symbol=symbol, quantity=quantity)
-                sell_price = float(sell_order['fills'][0]['price'])
-                notify(f"Venta ejecutada con ganancia a {sell_price} USDT")
-                break
-            elif change <= -stop_loss_threshold:
-                client.order_market_sell(symbol=symbol, quantity=quantity)
-                notify("Venta ejecutada por stop loss.")
-                break
+    while True:
+        price = get_price()
 
-            time.sleep(5)
-    except BinanceAPIException as e:
-        notify(f"Error en la operación: {e.message}")
+        if price >= entry_price * (1 + TAKE_PROFIT_PERCENT):
+            send_telegram_message(f"Ganancia detectada: Vendiendo con +1.5%. Precio: {price}")
+            place_order("SELL", quantity)
+            break
+        elif price <= entry_price * (1 - STOP_LOSS_PERCENT):
+            send_telegram_message(f"Pérdida controlada: Stop Loss activado. Precio: {price}")
+            place_order("SELL", quantity)
+            break
 
-# === Bucle infinito de scalping ===
-notify("ZafroBot Pro con análisis experto iniciado.")
-while True:
-    execute_trade()
-    time.sleep(60)
+        time.sleep(3)
+
+if __name__ == "__main__":
+    main()
