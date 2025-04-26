@@ -1,70 +1,77 @@
 import os
+import time
 import requests
 import hmac
 import hashlib
-import time
-import asyncio
+from flask import Flask
 from telegram import Bot
 
 # Variables de entorno
-API_KEY = os.getenv("API_KEY")
-SECRET_KEY = os.getenv("SECRET_KEY")
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
+API_KEY = os.getenv('API_KEY')
+API_SECRET = os.getenv('API_SECRET')
+CHAT_ID = os.getenv('CHAT_ID')
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 
-# Inicializar Bot
+# Inicializar bot de Telegram
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
-# Firmar parámetros
-def firmar_parametros(params):
-    query_string = '&'.join([f"{key}={params[key]}" for key in sorted(params)])
-    return hmac.new(SECRET_KEY.encode('utf-8'), query_string.encode('utf-8'), hashlib.sha256).hexdigest()
+# Variable para controlar si ya se notificó el inicio
+inicio_enviado = False
 
-# Obtener saldo
+# Función para obtener el saldo de USDT disponible en Spot
 def obtener_saldo():
-    url = "https://open-api.bingx.com/openApi/spot/v1/account/balance"
+    url = "https://open-api.bingx.com/openApi/user/balance"
     timestamp = str(int(time.time() * 1000))
-    params = {
-        "timestamp": timestamp
-    }
-    params["signature"] = firmar_parametros(params)
+    query_string = f"timestamp={timestamp}&recvWindow=5000"
+    signature = hmac.new(API_SECRET.encode('utf-8'), query_string.encode('utf-8'), hashlib.sha256).hexdigest()
     headers = {
-        "X-BX-APIKEY": API_KEY
+        'X-BX-APIKEY': API_KEY
     }
-    response = requests.get(url, headers=headers, params=params)
-    try:
+    final_url = f"{url}?{query_string}&signature={signature}"
+    response = requests.get(final_url, headers=headers)
+    if response.status_code == 200:
         data = response.json()
-        if data.get('code') == 0:
-            balances = data['data']['balances']
-            for asset in balances:
-                if asset['asset'] == "USDT":
-                    return float(asset['free'])
-            return 0.0
-        else:
-            return None
-    except Exception as e:
-        print(f"Error procesando saldo: {e}")
-        return None
+        for balance in data['data']:
+            if balance['asset'] == 'USDT':
+                return float(balance['availableBalance'])
+    return None
 
-# Función asíncrona para enviar mensaje
-async def enviar_mensaje_inicio(saldo):
-    if saldo is not None:
+# Función para notificar inicio (solo una vez)
+def notificar_inicio(saldo):
+    global inicio_enviado
+    if not inicio_enviado:
         mensaje = (
-            "✅ *ZafroBot Iniciado*\n"
-            "------------------------\n"
-            f"💳 *Saldo disponible:* `${saldo:.2f}` *USDT*\n"
-            "------------------------\n"
+            "✅ ZafroBot Iniciado\n"
+            "-----------------------------\n"
+            f"💳 Saldo disponible: ${saldo} USDT\n"
+            "-----------------------------\n"
             "⚡ ¡Listo para operar!"
         )
-    else:
-        mensaje = "⚠️ *Bot activo, pero no se pudo obtener el saldo.*"
-    
-    await bot.send_message(chat_id=CHAT_ID, text=mensaje, parse_mode="Markdown")
+        bot.send_message(chat_id=CHAT_ID, text=mensaje)
+        inicio_enviado = True
 
 # Función principal
-async def main():
-    saldo = obtener_saldo()
-    await enviar_mensaje_inicio(saldo)
+def main():
+    while True:
+        try:
+            saldo = obtener_saldo()
+            if saldo is not None:
+                notificar_inicio(saldo)
+            else:
+                bot.send_message(chat_id=CHAT_ID, text="⚠️ Bot iniciado, pero no se pudo obtener el saldo.")
+        except Exception as e:
+            bot.send_message(chat_id=CHAT_ID, text=f"⚠️ Error: {e}")
+        time.sleep(60)  # Esperar 60 segundos
 
-if __name__ == "__main__":
-    asyncio.run(main())
+# Crear app Flask para que Render no detenga el servicio
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "ZafroBot está funcionando."
+
+# Ejecutar
+if __name__ == '__main__':
+    import threading
+    threading.Thread(target=main).start()
+    app.run(host='0.0.0.0', port=10000)
