@@ -1,5 +1,6 @@
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
+from aiogram.filters import CommandStart
 import asyncio
 import os
 from keep_alive import keep_alive
@@ -15,13 +16,13 @@ dp = Dispatcher()
 async def enviar_mensaje(texto):
     await bot.send_message(chat_id=CHAT_ID, text=texto)
 
-# Comando /start
-@dp.message(commands=["start"])
+# Comando /start actualizado
+@dp.message(CommandStart())
 async def start_handler(message):
     await message.answer("✅ ZafroBot está activo y funcionando correctamente.")
 
 async def main():
-    keep_alive()  # Mantiene el bot vivo en Render
+    keep_alive()
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
