@@ -7,7 +7,6 @@ from aiogram.enums import ParseMode
 from aiogram.filters import Command
 from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.storage.memory import MemoryStorage
-from flask import Flask
 
 # Configurar logs
 logging.basicConfig(level=logging.INFO)
@@ -57,24 +56,8 @@ async def start_handler(message: types.Message):
             "⚠️ Bot vinculado, pero no se pudo obtener el saldo.\nVerifica tus API Keys."
         )
 
-# Inicializar Flask
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return 'Bot funcionando correctamente.'
-
 async def main():
     await dp.start_polling(bot)
 
 if __name__ == '__main__':
-    from threading import Thread
-
-    # Lanzar el bot en segundo plano
-    def run_bot():
-        asyncio.run(main())
-
-    Thread(target=run_bot).start()
-
-    # Correr servidor Flask
-    app.run(host='0.0.0.0', port=5000)
+    asyncio.run(main())
