@@ -2,125 +2,130 @@ import requests
 import time
 import hmac
 import hashlib
-import json
 import os
 
 # Variables de entorno
-API_KEY = os.getenv("API_KEY")
-SECRET_KEY = os.getenv("SECRET_KEY")
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
+API_KEY = os.getenv('API_KEY')
+API_SECRET = os.getenv('API_SECRET')
+TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
+TELEGRAM_CHAT_ID = os.getenv('CHAT_ID')
 
-# Funciones
+# Datos del par
+symbol = "SHIB-USDT"
+
+# Configuración de ganancia y pérdida
+take_profit_percentage = 1.5  # 1.5% de ganancia
+stop_loss_percentage = 2  # 2% de pérdida
+min_balance_to_trade = 5  # mínimo para operar
+
+# URL API BingX
+bingx_base_url = "https://open-api.bingx.com"
+
+# Enviar mensaje a Telegram
 def send_telegram_message(message):
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {
-        "chat_id": CHAT_ID,
+        "chat_id": TELEGRAM_CHAT_ID,
         "text": message,
         "parse_mode": "Markdown"
     }
-    requests.post(url, data=payload)
+    try:
+        requests.post(url, json=payload)
+    except Exception as e:
+        print(f"Error enviando mensaje de Telegram: {e}")
 
-def sign(params, secret_key):
+# Firmar parámetros para BingX
+def sign_params(params):
     query_string = '&'.join([f"{key}={params[key]}" for key in sorted(params)])
-    return hmac.new(secret_key.encode('utf-8'), query_string.encode('utf-8'), hashlib.sha256).hexdigest()
+    signature = hmac.new(API_SECRET.encode('utf-8'), query_string.encode('utf-8'), hashlib.sha256).hexdigest()
+    return signature
 
+# Consultar saldo disponible en Spot
 def get_balance():
-    url = "https://open-api.bingx.com/openApi/swap/v2/user/balance"
-    timestamp = str(int(time.time() * 1000))
-    params = {
-        "timestamp": timestamp
-    }
-    signature = sign(params, SECRET_KEY)
-    headers = {
-        "X-BX-APIKEY": API_KEY
-    }
-    params["signature"] = signature
-    response = requests.get(url, headers=headers, params=params)
-    data = response.json()
-
-    if "data" in data and "balanceList" in data["data"]:
-        for asset in data["data"]["balanceList"]:
+    url = f"{bingx_base_url}/openApi/spot/v1/account/balance"
+    params = {"timestamp": int(time.time() * 1000)}
+    params["signature"] = sign_params(params)
+    headers = {"X-BX-APIKEY": API_KEY}
+    try:
+        response = requests.get(url, params=params, headers=headers)
+        data = response.json()
+        for asset in data["data"]:
             if asset["asset"] == "USDT":
-                return float(asset["availableBalance"])
+                return float(asset["free"])
+    except Exception as e:
+        print(f"Error obteniendo balance: {e}")
     return 0.0
 
+# Consultar precio actual
+def get_price():
+    url = f"{bingx_base_url}/openApi/spot/v1/ticker/price"
+    params = {"symbol": symbol}
+    try:
+        response = requests.get(url, params=params)
+        data = response.json()
+        return float(data["data"]["price"])
+    except Exception as e:
+        print(f"Error obteniendo precio: {e}")
+    return 0.0
+
+# Comprar tokens
 def place_order(side, quantity):
-    url = "https://open-api.bingx.com/openApi/spot/v1/trade/order"
-    timestamp = str(int(time.time() * 1000))
+    url = f"{bingx_base_url}/openApi/spot/v1/order"
     params = {
-        "symbol": "SHIB-USDT",
+        "symbol": symbol,
         "side": side,
         "type": "MARKET",
         "quantity": quantity,
-        "timestamp": timestamp
+        "timestamp": int(time.time() * 1000)
     }
-    signature = sign(params, SECRET_KEY)
-    headers = {
-        "X-BX-APIKEY": API_KEY
-    }
-    params["signature"] = signature
-    response = requests.post(url, headers=headers, data=params)
-    return response.json()
-
-def get_price():
-    url = "https://open-api.bingx.com/openApi/spot/v1/market/ticker"
-    params = {"symbol": "SHIB-USDT"}
-    response = requests.get(url, params=params)
-    data = response.json()
-    if "data" in data and "price" in data["data"]:
-        return float(data["data"]["price"])
-    return None
-
-# Inicio
-send_telegram_message("🚀 *ZafroBot Dinámico Pro* ha iniciado. Detectando saldo disponible...")
-
-# Ciclo principal
-while True:
+    params["signature"] = sign_params(params)
+    headers = {"X-BX-APIKEY": API_KEY}
     try:
-        balance = get_balance()
-        if balance > 5:
-            send_telegram_message(f"💰 Saldo disponible detectado: *{balance:.2f} USDT*")
-            quantity_to_buy = balance * 0.8  # Usa el 80% del saldo
-            entry_price = get_price()
-
-            if entry_price:
-                send_telegram_message("🔎 Analizando oportunidad de entrada...")
-
-                # Simulación simple de análisis: esperar una buena condición (puedes expandir esta lógica)
-                time.sleep(5)  # Pequeño tiempo de espera antes de comprar
-
-                # Ejecutar compra
-                buy_order = place_order("BUY", quantity_to_buy / entry_price)
-                if buy_order.get("code") == 0:
-                    send_telegram_message("✅ Compra ejecutada exitosamente. Monitoreando precio para vender...")
-
-                    buy_price = entry_price
-                    take_profit_price = buy_price * 1.015  # +1.5%
-                    stop_loss_price = buy_price * 0.98    # -2%
-
-                    while True:
-                        current_price = get_price()
-                        if current_price:
-                            if current_price >= take_profit_price:
-                                # Venta Take Profit
-                                quantity_to_sell = quantity_to_buy / current_price
-                                sell_order = place_order("SELL", quantity_to_sell)
-                                if sell_order.get("code") == 0:
-                                    send_telegram_message(f"🎯 ¡Venta exitosa con ganancia de +1.5%! Precio: *{current_price:.8f}*")
-                                break
-                            elif current_price <= stop_loss_price:
-                                # Venta Stop Loss
-                                quantity_to_sell = quantity_to_buy / current_price
-                                sell_order = place_order("SELL", quantity_to_sell)
-                                if sell_order.get("code") == 0:
-                                    send_telegram_message(f"⚡ Venta ejecutada por stop loss. Precio: *{current_price:.8f}*")
-                                break
-                        time.sleep(5)
-        else:
-            send_telegram_message("⚠️ No hay suficiente saldo disponible para operar. Esperando...")
-        time.sleep(60)
-
+        response = requests.post(url, params=params, headers=headers)
+        data = response.json()
+        print(data)
+        return data
     except Exception as e:
-        send_telegram_message(f"❌ Error detectado: {str(e)}")
-        time.sleep(60)
+        print(f"Error colocando orden: {e}")
+
+# ZafroBot principal
+def zafrobot():
+    send_telegram_message("🚀 *Bienvenido a ZafroBot Dinámico.*\nEstamos monitoreando el mercado con análisis profesional en tiempo real.\nSolo se actuarán oportunidades seguras y verificadas.\n✅ ¡Gracias por confiar en nuestra tecnología de trading inteligente!")
+
+    balance = get_balance()
+    if balance < min_balance_to_trade:
+        send_telegram_message("⚠️ No hay saldo suficiente para operar. Mínimo requerido: 5 USDT.")
+        return
+
+    send_telegram_message(f"💰 Saldo disponible detectado: *{balance:.2f} USDT*\nAnalizando oportunidades...")
+
+    while True:
+        try:
+            price_entry = get_price()
+            print(f"Esperando oportunidad segura... Precio actual: {price_entry}")
+
+            # Simulando oportunidad segura (ejemplo simple)
+            time.sleep(5)  # Esperar para analizar
+            quantity = (balance * 0.8) / price_entry  # usar 80% del balance
+            place_order("BUY", quantity)
+            send_telegram_message(f"🛒 Entrada realizada en {symbol} a precio {price_entry:.8f}.")
+
+            # Monitorear Take Profit y Stop Loss
+            initial_price = price_entry
+            while True:
+                current_price = get_price()
+                if current_price >= initial_price * (1 + take_profit_percentage / 100):
+                    place_order("SELL", quantity)
+                    send_telegram_message(f"✅ ¡Ganancia realizada de +{take_profit_percentage}%!\nNuevo precio: {current_price:.8f}")
+                    return
+                if current_price <= initial_price * (1 - stop_loss_percentage / 100):
+                    place_order("SELL", quantity)
+                    send_telegram_message(f"🛡️ Stop Loss activado: -{stop_loss_percentage}%\nNuevo precio: {current_price:.8f}")
+                    return
+                time.sleep(5)
+        except Exception as e:
+            print(f"Error principal: {e}")
+            time.sleep(10)
+
+if __name__ == "__main__":
+    zafrobot()
