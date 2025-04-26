@@ -1,11 +1,11 @@
 from flask import Flask
 from threading import Thread
 
-app = Flask('')
+app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "ZafroBot está funcionando correctamente."
+    return "✅ ZafroBot está funcionando correctamente."
 
 def run():
     app.run(host='0.0.0.0', port=10000)
