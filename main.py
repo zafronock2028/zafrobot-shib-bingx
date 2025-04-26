@@ -1,6 +1,6 @@
 import os
 import asyncio
-from aiogram import Bot
+from aiogram import Bot, Dispatcher, types
 from flask import Flask
 
 app = Flask(__name__)
@@ -11,13 +11,27 @@ CHAT_ID = os.getenv('CHAT_ID')
 
 # Crear bot
 bot = Bot(token=API_TOKEN)
+dp = Dispatcher()
 
 @app.route('/')
 async def home():
     return 'Bot funcionando correctamente.'
 
 async def start_bot():
-    await bot.send_message(chat_id=CHAT_ID, text="✅ Bot arrancado correctamente.")
+    try:
+        saldo = obtener_saldo()  # Aquí va tu función real de saldo
+        if saldo is not None:
+            await bot.send_message(chat_id=CHAT_ID, text=f"✅ Saldo disponible: {saldo}")
+        else:
+            await bot.send_message(chat_id=CHAT_ID, text="⚠️ No se pudo obtener el saldo.")
+        
+        await bot.send_message(chat_id=CHAT_ID, text="✅ Bot arrancado correctamente.")
+    except Exception as e:
+        await bot.send_message(chat_id=CHAT_ID, text=f"⚠️ Error en el bot: {e}")
+
+def obtener_saldo():
+    # Lógica para obtener saldo real
+    return None
 
 if __name__ == '__main__':
     loop = asyncio.get_event_loop()
