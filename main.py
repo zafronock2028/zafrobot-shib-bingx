@@ -1,99 +1,137 @@
 import os
 import time
+import hmac
+import hashlib
 import requests
-from pybit import spot
+from flask import Flask
 from telegram import Bot
+from pybit.unified_trading import HTTP
 
-# Configuración de entorno
-API_KEY = os.getenv("API_KEY")
-API_SECRET = os.getenv("API_SECRET")
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
+# Configuración
+API_KEY = os.getenv('API_KEY')
+API_SECRET = os.getenv('API_SECRET')
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+CHAT_ID = os.getenv('CHAT_ID')
 
-# Configuración de trading
-PAIR = "SHIBUSDT"
-TAKE_PROFIT_PERCENT = 1.5
-STOP_LOSS_PERCENT = 2
-WAIT_TIME = 10  # segundos
-
-# Inicializar clientes
-session = spot.HTTP(
-    endpoint="https://api.bingx.com",
+# Cliente de BingX
+session = HTTP(
+    testnet=False,
     api_key=API_KEY,
-    api_secret=API_SECRET
+    api_secret=API_SECRET,
 )
+
+# Cliente de Telegram
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
-def enviar_mensaje(mensaje):
+# Variables de control
+en_operacion = False
+total_ganancia_diaria = 0.0
+conteo_operaciones = 0
+
+# Función para obtener saldo disponible
+def obtener_saldo():
     try:
-        bot.send_message(chat_id=CHAT_ID, text=mensaje, parse_mode="Markdown")
+        response = session.get_wallet_balance(accountType="SPOT")
+        balance = response['result']['balance']
+        for coin in balance:
+            if coin['coin'] == 'USDT':
+                return float(coin['availableBalance'])
+    except Exception as e:
+        print(f"Error obteniendo saldo: {e}")
+        return None
+
+# Función para enviar mensajes
+def enviar_mensaje(texto):
+    try:
+        bot.send_message(chat_id=CHAT_ID, text=texto)
     except Exception as e:
         print(f"Error enviando mensaje: {e}")
 
-def obtener_saldo_disponible():
-    balance = session.get_wallet_balance(coin="USDT")
-    saldo_total = float(balance['data']['balance'])
-    saldo_utilizar = saldo_total * 0.80
-    return saldo_utilizar
-
-def obtener_precio_actual():
-    ticker = session.latest_information_for_symbol(symbol=PAIR)
-    return float(ticker['data'][0]['lastPrice'])
-
-def comprar_shib(cantidad_usdt, precio_actual):
-    cantidad_shib = cantidad_usdt / precio_actual
-    cantidad_shib = round(cantidad_shib, 0)  # SHIB no usa decimales
-    session.place_active_order(
-        symbol=PAIR,
-        side="Buy",
-        type="Market",
-        quantity=str(cantidad_shib)
-    )
-    return cantidad_shib
-
-def vender_shib(cantidad_shib):
-    session.place_active_order(
-        symbol=PAIR,
-        side="Sell",
-        type="Market",
-        quantity=str(cantidad_shib)
-    )
-
-# INICIO
-saldo = obtener_saldo_disponible()
-precio_compra = None
-cantidad_shib = None
-operacion_abierta = False
-
-enviar_mensaje(f"✅ *Saldo Detectado:* ${saldo:.2f} *USDT*")
-time.sleep(2)
-enviar_mensaje("⚡ *ZafroBot comenzó el análisis.*\nCuando detecte una oportunidad real, recibirás la notificación de compra ejecutada.")
-
-while True:
+# Función para simular compra
+def comprar(cantidad):
     try:
-        precio_actual = obtener_precio_actual()
-        if not operacion_abierta:
-            # Simulando análisis profesional
-            if True:  # Aquí puedes luego integrar análisis real
-                cantidad_shib = comprar_shib(saldo, precio_actual)
-                precio_compra = precio_actual
-                operacion_abierta = True
-                enviar_mensaje(f"✅ *Compra ejecutada a:* ${precio_actual:.8f}")
-        else:
-            cambio_porcentaje = ((precio_actual - precio_compra) / precio_compra) * 100
-            if cambio_porcentaje >= TAKE_PROFIT_PERCENT:
-                vender_shib(cantidad_shib)
-                saldo = obtener_saldo_disponible()
-                enviar_mensaje(f"✅ *¡Operación cerrada!*\n_Vendido a:_ ${precio_actual:.8f}\n\n💰 *Saldo actual:* ${saldo:.2f}")
-                operacion_abierta = False
-            elif cambio_porcentaje <= -STOP_LOSS_PERCENT:
-                vender_shib(cantidad_shib)
-                saldo = obtener_saldo_disponible()
-                enviar_mensaje(f"❌ *¡Stop Loss activado!*\n_Vendido a:_ ${precio_actual:.8f}\n\n💰 *Saldo actual:* ${saldo:.2f}")
-                operacion_abierta = False
-
-        time.sleep(WAIT_TIME)
-
+        # Aquí deberías usar tu lógica real de compra
+        precio_compra = obtener_precio_actual()
+        enviar_mensaje(f"✅ ¡Compra ejecutada! Precio de compra: ${precio_compra:.6f}")
+        return precio_compra
     except Exception as e:
-        print(f"Error: {e}")
-        time.sleep(WAIT_TIME)
+        enviar_mensaje(f"⚠️ Error al comprar: {e}")
+        return None
+
+# Función para simular venta
+def vender(cantidad, precio_compra):
+    try:
+        # Aquí deberías usar tu lógica real de venta
+        precio_venta = obtener_precio_actual()
+        ganancia = (precio_venta - precio_compra) * cantidad
+        return ganancia, precio_venta
+    except Exception as e:
+        enviar_mensaje(f"⚠️ Error al vender: {e}")
+        return None, None
+
+# Función para obtener precio actual (simulado)
+def obtener_precio_actual():
+    # Simulación de precio actual
+    response = session.get_ticker(symbol="SHIB/USDT")
+    return float(response['result']['lastPrice'])
+
+# Función principal del bot
+def bot_principal():
+    global en_operacion, total_ganancia_diaria, conteo_operaciones
+
+    saldo = obtener_saldo()
+    if saldo is None:
+        enviar_mensaje("⚠️ Bot iniciado, pero no se pudo obtener el saldo.")
+        return
+
+    enviar_mensaje(f"✅ ZafroBot Iniciado\n-------------------------\n💳 Saldo disponible: ${saldo:.2f} USDT\n-------------------------\n⚡ ¡Listo para analizar oportunidades!")
+
+    time.sleep(2)
+
+    enviar_mensaje("⏳ Analizando oportunidades...\nCuando se detecte una entrada, recibirás la notificación automáticamente.")
+
+    cantidad_compra = saldo * 0.8  # Usamos el 80% del saldo
+
+    while True:
+        if not en_operacion:
+            precio_actual = obtener_precio_actual()
+            # Aquí colocas tu lógica para decidir cuándo comprar
+            # Suponiendo que siempre compra para ejemplo
+            precio_compra = comprar(cantidad_compra)
+            if precio_compra:
+                en_operacion = True
+                precio_objetivo = precio_compra * 1.015  # 1.5% de ganancia objetivo
+                precio_stop = precio_compra * 0.98       # 2% de pérdida stop loss
+
+                while en_operacion:
+                    precio_actual = obtener_precio_actual()
+                    if precio_actual >= precio_objetivo:
+                        ganancia, precio_venta = vender(cantidad_compra, precio_compra)
+                        saldo_actual = obtener_saldo()
+                        conteo_operaciones += 1
+                        total_ganancia_diaria += ganancia
+                        enviar_mensaje(f"✅ ¡Operación cerrada! Vendido a ${precio_venta:.6f}\nGanancia asegurada.\n💰 Saldo actual: ${saldo_actual:.2f}\n\nTrade {conteo_operaciones} PROFIT✅")
+                        en_operacion = False
+                    elif precio_actual <= precio_stop:
+                        ganancia, precio_venta = vender(cantidad_compra, precio_compra)
+                        saldo_actual = obtener_saldo()
+                        conteo_operaciones += 1
+                        total_ganancia_diaria += ganancia
+                        enviar_mensaje(f"❌ ¡Stop Loss activado! Vendido a ${precio_venta:.6f}\nPérdida limitada.\n💰 Saldo actual: ${saldo_actual:.2f}\n\nTrade {conteo_operaciones} -${abs(ganancia):.2f}❌")
+                        en_operacion = False
+
+                    time.sleep(5)  # Espera entre chequeos
+
+        time.sleep(5)
+
+# Servidor web para mantener Render activo
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "ZafroBot está corriendo."
+
+if __name__ == "__main__":
+    import threading
+    threading.Thread(target=bot_principal).start()
+    app.run(host="0.0.0.0", port=10000)
