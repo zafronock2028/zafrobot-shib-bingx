@@ -1,63 +1,71 @@
 import os
-import asyncio
 import requests
 from flask import Flask
 from telegram import Bot
+from dotenv import load_dotenv
 
-# Variables de entorno
-TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
-CHAT_ID = os.environ.get('CHAT_ID')
-API_KEY = os.environ.get('API_KEY')
-SECRET_KEY = os.environ.get('SECRET_KEY')
+# Cargar variables de entorno
+load_dotenv()
 
-# Instancia del bot
-bot = Bot(token=TELEGRAM_BOT_TOKEN)
+# Datos de acceso
+API_KEY = os.getenv('API_KEY')
+SECRET_KEY = os.getenv('SECRET_KEY')
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+CHAT_ID = os.getenv('CHAT_ID')
 
-# Crear app Flask
+# Inicializar Flask
 app = Flask(__name__)
 
-@app.route('/')
-def home():
-    return "Bot funcionando correctamente."
+# Inicializar bot de Telegram
+bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
-async def enviar_mensaje(texto):
+# Función para obtener saldo
+def obtener_saldo():
     try:
-        await bot.send_message(chat_id=CHAT_ID, text=texto)
-    except Exception as e:
-        print(f"Error enviando mensaje: {e}")
-
-async def obtener_saldo():
-    try:
+        url = "https://open-api.bingx.com/openApi/user/getBalance"
         headers = {
-            "X-BBX-APIKEY": API_KEY,
-            "X-BBX-SIGNATURE": SECRET_KEY,
+            "X-BX-APIKEY": API_KEY
         }
-        response = requests.get("https://api-swap-rest.bingx.com/openApi/swap/v2/user/balance", headers=headers)
+        response = requests.get(url, headers=headers)
         data = response.json()
-
-        usdt_balance = float(data["data"]["availableBalance"])
-        saldo = round(usdt_balance, 2)
-        return saldo
+        balances = data.get('data', {}).get('balanceList', [])
+        usdt_balance = next((b['balance'] for b in balances if b['asset'] == 'USDT'), None)
+        return float(usdt_balance) if usdt_balance else None
     except Exception as e:
         print(f"Error obteniendo saldo: {e}")
         return None
 
-async def inicio_bot():
-    # 1. Enviar mensaje de bienvenida
-    await enviar_mensaje("✅ Bot iniciado correctamente. Bienvenido Zafronock.")
+# Función para enviar mensajes de forma segura
+def enviar_mensaje(texto):
+    try:
+        bot.send_message(chat_id=CHAT_ID, text=texto)
+    except Exception as e:
+        print(f"Error enviando mensaje: {e}")
 
-    # 2. Obtener y enviar saldo
-    saldo = await obtener_saldo()
+# Ruta principal
+@app.route('/')
+def inicio():
+    return "Bot funcionando correctamente."
+
+# Función de arranque
+def arranque_bot():
+    # Enviar mensaje de arranque
+    enviar_mensaje("✅ Bot iniciado correctamente.")
+
+    # Obtener y mostrar saldo
+    saldo = obtener_saldo()
     if saldo is not None:
-        await enviar_mensaje(f"💰 Saldo disponible: {saldo} USDT.")
+        enviar_mensaje(f"💰 Saldo actual detectado: {saldo:.2f} USDT.")
     else:
-        await enviar_mensaje("⚠️ No se pudo obtener el saldo.")
+        enviar_mensaje("⚠️ No se pudo obtener el saldo.")
 
-    # 3. Mensaje de inicio de análisis
-    await enviar_mensaje("🔍 Iniciando análisis... Buscando mejor oportunidad.")
+    # Mensaje de inicio de análisis
+    enviar_mensaje("🔍 Iniciando análisis... Buscando mejor oportunidad.")
 
-# Ejecutar
-if __name__ == '__main__':
-    loop = asyncio.get_event_loop()
-    loop.create_task(inicio_bot())
+# Ejecutar funciones después de iniciar Flask
+with app.app_context():
+    arranque_bot()
+
+# Ejecutar app
+if __name__ == "__main__":
     app.run(host='0.0.0.0', port=10000)
