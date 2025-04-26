@@ -9,7 +9,7 @@ app = Flask(__name__)
 API_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 CHAT_ID = os.getenv('CHAT_ID')
 
-# Crear bot
+# Crear bot y dispatcher
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
@@ -19,16 +19,16 @@ async def home():
 
 async def start_bot():
     try:
-        saldo = obtener_saldo()  # Aquí va tu función real
+        saldo = obtener_saldo()  # Aquí implementas tu lógica
         if saldo is not None:
-            await bot.send_message(chat_id=CHAT_ID, text=f"Saldo actual: {saldo}")
+            await bot.send_message(chat_id=CHAT_ID, text=f'Saldo: {saldo}')
         else:
-            await bot.send_message(chat_id=CHAT_ID, text="No se pudo obtener saldo.")
+            await bot.send_message(chat_id=CHAT_ID, text='No se pudo obtener el saldo.')
     except Exception as e:
-        await bot.send_message(chat_id=CHAT_ID, text=f"Error: {e}")
+        await bot.send_message(chat_id=CHAT_ID, text=f'Error: {e}')
 
 def obtener_saldo():
-    # Lógica para obtener saldo real
+    # Aquí va la lógica real para obtener el saldo
     return None
 
 if __name__ == '__main__':
