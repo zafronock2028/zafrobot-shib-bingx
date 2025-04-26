@@ -1,55 +1,65 @@
 import os
-import asyncio
-import aiohttp
-import requests
-from aiogram import Bot, Dispatcher, types
+import logging
+from aiogram import Bot, Dispatcher, types, executor
 from flask import Flask
+import requests
 
-app = Flask(__name__)
+# Configurar logs
+logging.basicConfig(level=logging.INFO)
 
 # Variables de entorno
 API_KEY = os.getenv('API_KEY')
 SECRET_KEY = os.getenv('SECRET_KEY')
-CHAT_ID = os.getenv('CHAT_ID')
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+CHAT_ID = os.getenv('CHAT_ID')
 
 # Crear bot y dispatcher
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
-dp = Dispatcher()
+dp = Dispatcher(bot)
 
-@app.route('/')
-async def home():
-    return 'Bot funcionando correctamente.'
-
-async def obtener_saldo():
+# Función para obtener saldo en Spot
+def obtener_saldo():
+    url = "https://open-api.bingx.com/openApi/spot/v1/account/assets"
     headers = {
-        'X-BX-APIKEY': API_KEY,
-        'X-BX-APISECRET': SECRET_KEY
+        "X-BX-APIKEY": API_KEY
     }
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get('https://open-api.bingx.com/openApi/user/getBalance') as resp:
-                data = await resp.json()
-                balance_list = data.get('data', {}).get('balances', [])
-                for coin in balance_list:
-                    if coin.get('asset') == 'USDT':
-                        return float(coin.get('balance', 0))
-                return 0.0
-    except Exception as e:
+    response = requests.get(url, headers=headers)
+
+    if response.status_code == 200:
+        data = response.json()
+        if data['code'] == 0:
+            for asset in data['data']:
+                if asset['asset'] == 'USDT':
+                    return float(asset['balance'])
+        else:
+            return None
+    else:
         return None
 
-async def start_bot():
-    try:
-        saldo = await obtener_saldo()
-        if saldo is not None:
-            mensaje = f"✅ ¡Bot vinculado exitosamente!\nSaldo disponible: {saldo:.2f} USDT."
-        else:
-            mensaje = "⚠️ Error al obtener el saldo de BingX."
-        await bot.send_message(chat_id=CHAT_ID, text=mensaje)
-    except Exception as e:
-        await bot.send_message(chat_id=CHAT_ID, text=f"Error en el bot: {e}")
+# Comando /start
+@dp.message_handler(commands=['start'])
+async def start_handler(message: types.Message):
+    saldo = obtener_saldo()
+    if saldo is not None:
+        await message.answer(f"¡Bienvenido, tu bot está vinculado correctamente!\nSaldo actual en Spot: {saldo:.2f} USDT")
+    else:
+        await message.answer("¡Bienvenido, tu bot está vinculado!\nNo se pudo obtener el saldo. Verifica tus API Keys.")
+
+# Inicializar Flask
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return 'Bot funcionando correctamente.'
 
 if __name__ == '__main__':
-    loop = asyncio.get_event_loop()
-    loop.create_task(start_bot())
+    from threading import Thread
+
+    # Lanzar el bot en segundo plano
+    def run_bot():
+        executor.start_polling(dp, skip_updates=True)
+
+    Thread(target=run_bot).start()
+
+    # Correr servidor Flask
     app.run(host='0.0.0.0', port=5000)
