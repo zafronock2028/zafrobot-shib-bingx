@@ -11,19 +11,15 @@ CHAT_ID = os.environ.get('CHAT_ID')
 # Crear el bot
 bot = telegram.Bot(token=TELEGRAM_BOT_TOKEN)
 
-# Función para enviar mensaje de inicio
+# Función que envía el mensaje
 def enviar_mensaje_inicio():
     mensaje = "✅ Bot de prueba iniciado correctamente y listo para operar."
     bot.send_message(chat_id=CHAT_ID, text=mensaje)
 
-# Cuando el servidor esté listo
-@app.before_first_request
-def before_first_request_func():
-    enviar_mensaje_inicio()
-
-# Rutas para mantener activo en Render
+# Endpoint principal
 @app.route('/')
 def home():
+    enviar_mensaje_inicio()
     return "Bot funcionando correctamente."
 
 # Ejecutar
