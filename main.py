@@ -1,7 +1,8 @@
 import asyncio
 import requests
-from aiogram import Bot, Dispatcher, types
+from aiogram import Bot, Dispatcher, Router, types
 from aiogram.enums import ParseMode
+from aiogram.filters import Command
 from flask import Flask
 import os
 
@@ -12,8 +13,10 @@ CHAT_ID = int(os.getenv("CHAT_ID"))
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
 # Inicializar bot de Telegram
-bot = Bot(token=TELEGRAM_BOT_TOKEN)
+bot = Bot(token=TELEGRAM_BOT_TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher()
+router = Router()
+dp.include_router(router)
 
 # Inicializar Flask
 app = Flask(__name__)
@@ -34,7 +37,7 @@ def obtener_saldo():
                     return balance["availableMargin"]
     return None
 
-# Función para enviar mensaje de saldo
+# Función para enviar el saldo
 async def enviar_saldo():
     saldo = obtener_saldo()
     if saldo is not None:
@@ -43,15 +46,15 @@ async def enviar_saldo():
         mensaje = "⚠️ Bot vinculado, pero no se pudo obtener el saldo.\nVerifica tus API Keys."
     await bot.send_message(chat_id=CHAT_ID, text=mensaje)
 
-# Handler de /start
-@dp.message(commands=["start"])
+# Nuevo handler de /start usando Router
+@router.message(Command("start"))
 async def start_command(message: types.Message):
     await enviar_saldo()
 
-# Flask endpoint para mantener el bot activo en Render
+# Endpoint de Flask
 @app.route('/')
 def home():
-    return "ZafroBot Dinámico Pro está corriendo!"
+    return "ZafroBot Dinámico Pro está activo!"
 
 async def main():
     await dp.start_polling(bot)
