@@ -3,29 +3,30 @@ import time
 import hmac
 import hashlib
 import os
+import json
 
-# === CONFIGURACIÓN DESDE VARIABLES DE ENTORNO ===
+# Variables de entorno
 API_KEY = os.getenv("API_KEY")
 SECRET_KEY = os.getenv("SECRET_KEY")
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
-SYMBOL = "SHIB-USDT"
-PRECISION = 4
-TAKE_PROFIT = 0.02   # 2% ganancia
-STOP_LOSS = 0.02     # 2% pérdida
-RETROCESO_MIN = 0.003  # 0.3%
-RETROCESO_MAX = 0.007  # 0.7%
-RECUPERACION_CONFIRMADA = 0.0015  # 0.15%
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# === FUNCIONES ===
-def enviar_mensaje_telegram(mensaje):
+# Par a operar
+SYMBOL = "SHIB-USDT"
+
+# Parámetros de operación
+PORCENTAJE_ENTRADA = 0.80  # 80%
+OBJETIVO_GANANCIA = 1.02   # 2% arriba
+STOP_LOSS = 0.98            # 2% abajo
+
+def enviar_mensaje(texto):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    data = {
+    payload = {
         "chat_id": CHAT_ID,
-        "text": mensaje,
+        "text": texto,
         "parse_mode": "Markdown"
     }
-    requests.post(url, data=data)
+    requests.post(url, data=payload)
 
 def obtener_saldo_usdt():
     url = "https://open-api.bingx.com/openApi/user/balance"
@@ -37,111 +38,83 @@ def obtener_saldo_usdt():
         hashlib.sha256
     ).hexdigest()
 
-    headers = {"X-BX-APIKEY": API_KEY}
-    params = {"timestamp": timestamp, "signature": signature}
-    
-    response = requests.get(url, headers=headers, params=params)
-    data = response.json()
-    for asset in data['data']['balances']:
-        if asset['asset'] == 'USDT':
-            return float(asset['free'])
-    return 0.0
-
-def obtener_precio_actual():
-    url = f"https://open-api.bingx.com/openApi/market/getLatestPrice?symbol={SYMBOL}"
-    response = requests.get(url)
-    return float(response.json()['data'][0]['price'])
-
-def colocar_orden(tipo, cantidad, precio):
-    url = "https://open-api.bingx.com/openApi/spot/v1/trade/order"
-    timestamp = str(int(time.time() * 1000))
-    body = f"symbol={SYMBOL}&price={precio}&quantity={cantidad}&side={tipo}&type=LIMIT&timestamp={timestamp}"
-    signature = hmac.new(
-        SECRET_KEY.encode('utf-8'),
-        body.encode('utf-8'),
-        hashlib.sha256
-    ).hexdigest()
-
     headers = {
-        "X-BX-APIKEY": API_KEY,
-        "Content-Type": "application/x-www-form-urlencoded"
+        "X-BX-APIKEY": API_KEY
     }
-    data = {
-        "symbol": SYMBOL,
-        "price": precio,
-        "quantity": cantidad,
-        "side": tipo,
-        "type": "LIMIT",
+    params = {
         "timestamp": timestamp,
         "signature": signature
     }
-    response = requests.post(url, headers=headers, data=data)
-    return response.json()
+    response = requests.get(url, headers=headers, params=params)
+    result = response.json()
 
-# === LÓGICA DEL BOT ===
+    if "data" not in result or "balances" not in result["data"]:
+        print("Error al obtener saldo:", result)
+        return None
+    
+    for asset in result["data"]["balances"]:
+        if asset["asset"] == "USDT":
+            return float(asset["free"])
+    
+    return None
+
+def obtener_precio_actual():
+    url = f"https://api.bingx.com/openApi/spot/market/getLatestPrice?symbol={SYMBOL}"
+    response = requests.get(url)
+    result = response.json()
+
+    if "data" in result and isinstance(result["data"], list) and len(result["data"]) > 0:
+        return float(result["data"][0]["price"])
+    else:
+        print("Error al obtener precio:", result)
+        return None
+
+def comprar_shib(cantidad_shib, precio_actual):
+    print(f"Simulando compra de {cantidad_shib} SHIB a precio {precio_actual}")
+    return True
+
+def vender_shib(cantidad_shib, precio_actual):
+    print(f"Simulando venta de {cantidad_shib} SHIB a precio {precio_actual}")
+    return True
+
 def zafrobot_dinamico_pro():
-    print("=== ZafroBot PRO Iniciado ===")
+    print("\n=== ZafroBot Dinámico Pro Iniciado ===")
+
     saldo = obtener_saldo_usdt()
-    if saldo < 1:
-        print("Saldo insuficiente.")
-        enviar_mensaje_telegram("*ZafroBot:* Saldo insuficiente para operar.")
+    if saldo is None or saldo < 1:
+        print("Saldo insuficiente para operar.")
+        enviar_mensaje("⚠️ *Saldo insuficiente para operar.*")
         return
+    
+    saldo_operar = saldo * PORCENTAJE_ENTRADA
+    precio_inicio = obtener_precio_actual()
+    if precio_inicio is None:
+        return
+    
+    cantidad_shib = saldo_operar / precio_inicio
+    comprar_shib(cantidad_shib, precio_inicio)
 
-    capital_usar = saldo * 0.80
+    precio_take_profit = precio_inicio * OBJETIVO_GANANCIA
+    precio_stop_loss = precio_inicio * STOP_LOSS
 
-    precio_inicial = obtener_precio_actual()
-    print(f"Precio inicial: {precio_inicial}")
-
-    fondo_detectado = precio_inicial
     while True:
         precio_actual = obtener_precio_actual()
-        variacion = (precio_actual - precio_inicial) / precio_inicial
+        if precio_actual is None:
+            time.sleep(10)
+            continue
+        
+        if precio_actual >= precio_take_profit:
+            vender_shib(cantidad_shib, precio_actual)
+            ganancia = (precio_actual / precio_inicio - 1) * 100
+            enviar_mensaje(f"✅ *¡Operación ganada!* +{ganancia:.2f}%\n\n_Saldo operativo creciendo cada día._\n\nÚnete: [Canal Oficial](https://t.me/GanandoConZafronock)")
+            break
+        
+        if precio_actual <= precio_stop_loss:
+            vender_shib(cantidad_shib, precio_actual)
+            enviar_mensaje(f"⚠️ *Stop Loss activado.*\n\nProtegimos tu saldo para seguir operando.")
+            break
 
-        if precio_actual < fondo_detectado:
-            fondo_detectado = precio_actual
+        time.sleep(10)
 
-        retroceso = (fondo_detectado - precio_actual) / fondo_detectado
-
-        # Detectar retroceso
-        if RETROCESO_MIN <= retroceso <= RETROCESO_MAX:
-            print(f"Retroceso detectado: {retroceso*100:.2f}%")
-            
-            # Esperar confirmación de recuperación
-            while True:
-                precio_confirmacion = obtener_precio_actual()
-                recuperacion = (precio_confirmacion - fondo_detectado) / fondo_detectado
-                if recuperacion >= RECUPERACION_CONFIRMADA:
-                    cantidad = round(capital_usar / precio_confirmacion, PRECISION)
-                    colocar_orden("BUY", cantidad, precio_confirmacion)
-                    print(f"Compra ejecutada en recuperación a {precio_confirmacion}")
-                    break
-                time.sleep(5)
-            
-            # Luego de comprar, definir objetivos
-            precio_objetivo = precio_confirmacion * (1 + TAKE_PROFIT)
-            precio_stop = precio_confirmacion * (1 - STOP_LOSS)
-
-            while True:
-                precio_actual2 = obtener_precio_actual()
-                print(f"Monitoreando operación: {precio_actual2}")
-                if precio_actual2 >= precio_objetivo:
-                    colocar_orden("SELL", cantidad, precio_actual2)
-                    nuevo_saldo = obtener_saldo_usdt()
-                    mensaje = (
-                        "✅ *¡Ganancia alcanzada!* +2%\n\n"
-                        f"💰 *Nuevo saldo:* `${nuevo_saldo:.2f}`\n\n"
-                        "🔗 [Únete a mi canal oficial](https://t.me/GanandoConZafronock)"
-                    )
-                    enviar_mensaje_telegram(mensaje)
-                    return
-                elif precio_actual2 <= precio_stop:
-                    colocar_orden("SELL", cantidad, precio_actual2)
-                    enviar_mensaje_telegram("⚠️ *¡Stop Loss activado!* Capital protegido.")
-                    return
-                time.sleep(5)
-
-        time.sleep(5)
-
-# === INICIAR BOT ===
 if __name__ == "__main__":
     zafrobot_dinamico_pro()
