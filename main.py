@@ -1,9 +1,8 @@
 import os
 import asyncio
+from aiohttp import web
+from aiohttp.web_response import Response
 from aiogram import Bot, Dispatcher, types
-from flask import Flask
-
-app = Flask(__name__)
 
 # Variables de entorno
 API_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
@@ -11,29 +10,34 @@ CHAT_ID = os.getenv('CHAT_ID')
 
 # Crear bot
 bot = Bot(token=API_TOKEN)
-dp = Dispatcher()
+dp = Dispatcher(bot)
 
-@app.route('/')
-async def home():
-    return 'Bot funcionando correctamente.'
+# Función de inicio simple
+async def home(request):
+    return Response(text="Bot funcionando correctamente.")
 
+# Función principal para enviar mensajes
 async def start_bot():
     try:
-        saldo = obtener_saldo()  # Aquí va tu función real de saldo
+        saldo = obtener_saldo()
         if saldo is not None:
-            await bot.send_message(chat_id=CHAT_ID, text=f"✅ Saldo disponible: {saldo}")
+            await bot.send_message(chat_id=CHAT_ID, text=f'Saldo actual: {saldo}')
         else:
-            await bot.send_message(chat_id=CHAT_ID, text="⚠️ No se pudo obtener el saldo.")
-        
-        await bot.send_message(chat_id=CHAT_ID, text="✅ Bot arrancado correctamente.")
+            await bot.send_message(chat_id=CHAT_ID, text='No se pudo obtener el saldo.')
     except Exception as e:
-        await bot.send_message(chat_id=CHAT_ID, text=f"⚠️ Error en el bot: {e}")
+        await bot.send_message(chat_id=CHAT_ID, text=f'Error: {str(e)}')
 
+# Función simulada para obtener saldo
 def obtener_saldo():
-    # Lógica para obtener saldo real
-    return None
+    return None  # Aquí debes poner tu lógica real
+
+# Arranque del servidor y bot
+async def on_startup(app):
+    asyncio.create_task(start_bot())
+
+app = web.Application()
+app.router.add_get('/', home)
+app.on_startup.append(on_startup)
 
 if __name__ == '__main__':
-    loop = asyncio.get_event_loop()
-    loop.create_task(start_bot())
-    app.run(host='0.0.0.0', port=5000)
+    web.run_app(app, host='0.0.0.0', port=5000)
