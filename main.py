@@ -1,6 +1,9 @@
 import os
 import logging
-from aiogram import Bot, Dispatcher, types, executor
+import asyncio
+from aiogram import Bot, Dispatcher, types
+from aiogram.enums import ParseMode
+from aiogram.fsm.storage.memory import MemoryStorage
 from flask import Flask
 import requests
 
@@ -14,8 +17,8 @@ TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 CHAT_ID = os.getenv('CHAT_ID')
 
 # Crear bot y dispatcher
-bot = Bot(token=TELEGRAM_BOT_TOKEN)
-dp = Dispatcher(bot)
+bot = Bot(token=TELEGRAM_BOT_TOKEN, parse_mode=ParseMode.HTML)
+dp = Dispatcher(storage=MemoryStorage())
 
 # Función para obtener saldo en Spot
 def obtener_saldo():
@@ -37,13 +40,13 @@ def obtener_saldo():
         return None
 
 # Comando /start
-@dp.message_handler(commands=['start'])
+@dp.message(commands=['start'])
 async def start_handler(message: types.Message):
     saldo = obtener_saldo()
     if saldo is not None:
-        await message.answer(f"¡Bienvenido, tu bot está vinculado correctamente!\nSaldo actual en Spot: {saldo:.2f} USDT")
+        await message.answer(f"¡✅ Bot vinculado correctamente!\n\n<b>Saldo en Spot:</b> {saldo:.2f} USDT")
     else:
-        await message.answer("¡Bienvenido, tu bot está vinculado!\nNo se pudo obtener el saldo. Verifica tus API Keys.")
+        await message.answer("⚠️ Bot vinculado, pero no se pudo obtener el saldo.\nVerifica tus API Keys.")
 
 # Inicializar Flask
 app = Flask(__name__)
@@ -52,12 +55,15 @@ app = Flask(__name__)
 def home():
     return 'Bot funcionando correctamente.'
 
+async def main():
+    await dp.start_polling(bot)
+
 if __name__ == '__main__':
     from threading import Thread
 
     # Lanzar el bot en segundo plano
     def run_bot():
-        executor.start_polling(dp, skip_updates=True)
+        asyncio.run(main())
 
     Thread(target=run_bot).start()
 
