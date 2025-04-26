@@ -1,145 +1,133 @@
 import os
 import time
+import hmac
+import hashlib
 import requests
-from pybit.unified_trading import HTTP
-from datetime import datetime, timedelta
+import threading
+import datetime
+from flask import Flask
+from telegram import Bot
 
 # Variables de entorno
-api_key = os.getenv("API_KEY")
-api_secret = os.getenv("API_SECRET")
-telegram_token = os.getenv("TELEGRAM_BOT_TOKEN")
-chat_id = os.getenv("CHAT_ID")
+API_KEY = os.getenv('API_KEY')
+SECRET_KEY = os.getenv('SECRET_KEY')
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+CHAT_ID = os.getenv('CHAT_ID')
 
-# Configuraciones
-pair = "SHIBUSDT"
-profit_target = 1.5  # 1.5% ganancia
-stop_loss_threshold = -2.0  # -2% pérdida
-capital_usage = 0.8  # Usar el 80% del saldo
-report_time_utc = "00:00"  # Hora de reporte diario en UTC (modificable)
+# Configuración
+PAIR = "SHIB-USDT"
+BASE_URL = "https://open-api.bingx.com"
+bot = Bot(token=TELEGRAM_BOT_TOKEN)
+app = Flask(__name__)
 
-# Inicializar cliente de BingX
-session = HTTP(
-    testnet=False,
-    api_key=api_key,
-    api_secret=api_secret,
-)
+# Estado del bot
+operacion_abierta = False
+precio_compra = 0
+contador_operaciones = 0
+ganancia_total = 0.0
 
-# Variables de control
-active_trade = False
-entry_price = 0.0
-trade_counter = 1
-daily_profit = 0.0
-last_report_date = datetime.utcnow().date()
+def firmar_parametros(params):
+    query_string = '&'.join([f"{key}={params[key]}" for key in sorted(params)])
+    signature = hmac.new(SECRET_KEY.encode('utf-8'), query_string.encode('utf-8'), hashlib.sha256).hexdigest()
+    return signature
 
-# Funciones
-def send_telegram(message):
-    url = f"https://api.telegram.org/bot{telegram_token}/sendMessage"
-    payload = {"chat_id": chat_id, "text": message, "parse_mode": "Markdown"}
+def obtener_saldo():
+    timestamp = int(time.time() * 1000)
+    params = {
+        "timestamp": timestamp
+    }
+    params["signature"] = firmar_parametros(params)
+    headers = {
+        "X-BX-APIKEY": API_KEY
+    }
     try:
-        requests.post(url, data=payload)
-    except Exception as e:
-        print(f"Error enviando mensaje a Telegram: {e}")
-
-def get_balance():
-    try:
-        balance = session.get_wallet_balance(accountType="UNIFIED")
-        usdt_balance = float(balance['result']['list'][0]['totalEquity'])
-        return usdt_balance
+        response = requests.get(f"{BASE_URL}/openApi/wallet/balance", headers=headers, params=params)
+        data = response.json()
+        for balance in data['data']['balance']:
+            if balance['asset'] == 'USDT':
+                return float(balance['available'])
     except Exception as e:
         print(f"Error obteniendo balance: {e}")
-        return 0.0
+    return None
 
-def get_price(symbol):
+def obtener_precio():
     try:
-        price = session.get_ticker(symbol=symbol)['result'][0]['lastPrice']
-        return float(price)
+        response = requests.get(f"{BASE_URL}/openApi/spot/v1/ticker/price?symbol={PAIR.replace('-', '')}")
+        data = response.json()
+        return float(data['data']['price'])
     except Exception as e:
         print(f"Error obteniendo precio: {e}")
-        return 0.0
+    return None
 
-def buy_shib(usdt_amount):
-    price = get_price(pair)
-    if price == 0:
-        return 0
-    quantity = round((usdt_amount / price), 0)
+def enviar_mensaje(texto):
     try:
-        order = session.place_order(
-            category="spot",
-            symbol=pair,
-            side="Buy",
-            orderType="Market",
-            qty=quantity
-        )
-        return price
+        bot.send_message(chat_id=CHAT_ID, text=texto)
     except Exception as e:
-        print(f"Error ejecutando compra: {e}")
-        return 0
+        print(f"Error enviando mensaje: {e}")
 
-def sell_shib(quantity):
-    try:
-        order = session.place_order(
-            category="spot",
-            symbol=pair,
-            side="Sell",
-            orderType="Market",
-            qty=quantity
-        )
-        return True
-    except Exception as e:
-        print(f"Error ejecutando venta: {e}")
-        return False
+def comprar():
+    global operacion_abierta, precio_compra
+    saldo = obtener_saldo()
+    if saldo is None:
+        enviar_mensaje("⚠️ Bot iniciado, pero no se pudo obtener el saldo.")
+        return
+    usdt_disponible = saldo * 0.8
+    precio_actual = obtener_precio()
+    if precio_actual:
+        cantidad = usdt_disponible / precio_actual
+        operacion_abierta = True
+        precio_compra = precio_actual
+        enviar_mensaje(f"✅ ¡Compra realizada!\n\nComprado a ${precio_actual:.8f}\nCantidad: {cantidad:.0f} {PAIR.split('-')[0]}")
 
-# Iniciar bot
-send_telegram("🤖 *ZafroBot Dinámico* ha iniciado.\n🔍 Analizando oportunidades en *SHIB/USDT*...")
+def vender(precio_actual, ganancia):
+    global operacion_abierta, precio_compra, contador_operaciones, ganancia_total
+    operacion_abierta = False
+    contador_operaciones += 1
+    ganancia_total += ganancia
+    if ganancia >= 0:
+        enviar_mensaje(f"✅ ¡Operación cerrada! Vendido a ${precio_actual:.8f}.\nGanancia: +${ganancia:.2f} ✅\n\n💰Saldo actualizado: {obtener_saldo():.2f} USDT")
+    else:
+        enviar_mensaje(f"❌ ¡Operación cerrada con pérdida! Vendido a ${precio_actual:.8f}.\nPérdida: -${abs(ganancia):.2f} ❌\n\n💰Saldo actualizado: {obtener_saldo():.2f} USDT")
 
-while True:
-    now = datetime.utcnow()
+def evaluar_operacion():
+    global operacion_abierta, precio_compra
+    while True:
+        if not operacion_abierta:
+            comprar()
+        else:
+            precio_actual = obtener_precio()
+            if precio_actual:
+                cambio = (precio_actual - precio_compra) / precio_compra
+                if cambio >= 0.015:  # +1.5%
+                    saldo = obtener_saldo()
+                    vender(precio_actual, saldo * 0.015)
+                elif cambio <= -0.02:  # -2%
+                    saldo = obtener_saldo()
+                    vender(precio_actual, saldo * -0.02)
+        time.sleep(5)
 
-    # Reporte diario
-    if now.strftime("%H:%M") == report_time_utc and last_report_date != now.date():
-        send_telegram(f"📊 *Reporte Diario*: Ganancia acumulada: `${daily_profit:.2f}` USDT")
-        daily_profit = 0.0
-        last_report_date = now.date()
+def resumen_diario():
+    global contador_operaciones, ganancia_total
+    while True:
+        ahora = datetime.datetime.now()
+        segundos_hasta_medianoche = (86400 - (ahora.hour * 3600 + ahora.minute * 60 + ahora.second))
+        time.sleep(segundos_hasta_medianoche)
+        enviar_mensaje(f"🧾 Resumen del día:\n\nTrades cerrados: {contador_operaciones}\nGanancia total: ${ganancia_total:.2f} USDT")
+        contador_operaciones = 0
+        ganancia_total = 0.0
 
-    try:
-        if not active_trade:
-            saldo = get_balance()
-            if saldo < 5:
-                send_telegram("⚠️ *Saldo insuficiente para operar*.")
-                time.sleep(60)
-                continue
+@app.route('/')
+def home():
+    return "ZafroBot Dinámico Pro está activo."
 
-            usdt_to_use = saldo * capital_usage
-            entry_price = buy_shib(usdt_to_use)
-            if entry_price > 0:
-                quantity_bought = usdt_to_use / entry_price
-                active_trade = True
-                send_telegram(f"🟢 *Compra realizada* a `{entry_price}` USDT.\n🔄 Monitoreando operación...")
-                entry_time = datetime.utcnow()
+if __name__ == "__main__":
+    # Enviar mensaje inicial de saldo
+    saldo_inicial = obtener_saldo()
+    if saldo_inicial:
+        enviar_mensaje(f"✅ ZafroBot Iniciado\n\n💵 Saldo disponible: ${saldo_inicial:.2f} USDT\n\n⚡ ¡Listo para operar!")
+    else:
+        enviar_mensaje("⚠️ Bot iniciado, pero no se pudo obtener el saldo.")
 
-        if active_trade:
-            current_price = get_price(pair)
-            price_change = ((current_price - entry_price) / entry_price) * 100
-
-            if price_change >= profit_target:
-                if sell_shib(quantity_bought):
-                    profit = quantity_bought * (current_price - entry_price)
-                    daily_profit += profit
-                    send_telegram(f"✅ *Operación cerrada!* Vendido a `{current_price}` USDT.\n📈 *Ganancia:* `${profit:.2f}`\n💰 *Saldo actual:* `${get_balance():.2f}`")
-                    active_trade = False
-                    trade_counter += 1
-                    time.sleep(10)
-            elif price_change <= stop_loss_threshold:
-                if sell_shib(quantity_bought):
-                    loss = quantity_bought * (current_price - entry_price)
-                    daily_profit += loss
-                    send_telegram(f"❌ *Operación cerrada en pérdida.* Vendido a `{current_price}` USDT.\n📉 *Pérdida:* `${loss:.2f}`\n💰 *Saldo actual:* `${get_balance():.2f}`")
-                    active_trade = False
-                    trade_counter += 1
-                    time.sleep(10)
-
-    except Exception as e:
-        print(f"Error general: {e}")
-        time.sleep(60)
-
-    time.sleep(10)
+    threading.Thread(target=evaluar_operacion).start()
+    threading.Thread(target=resumen_diario).start()
+    app.run(host='0.0.0.0', port=10000)
