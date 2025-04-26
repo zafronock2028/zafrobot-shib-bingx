@@ -1,137 +1,146 @@
-import requests
+import os
 import time
+import requests
 import hmac
 import hashlib
-import os
+import json
 
-# Configuración de entorno
-API_KEY = os.getenv("API_KEY")
-SECRET_KEY = os.getenv("SECRET_KEY")
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
+# Variables de entorno
+API_KEY = os.getenv('API_KEY')
+SECRET_KEY = os.getenv('SECRET_KEY')
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+CHAT_ID = os.getenv('CHAT_ID')
 
-# Parámetros de scalping
-PAR = "SHIB-USDT"
-DECIMALES = 0  # Para cantidad de SHIB
-MARGEN_GANANCIA = 1.02  # +2%
-STOP_LOSS = 0.98        # -2%
+# Parámetros
+symbol = "SHIB-USDT"
+base_url = "https://api.bingx.com"
+telegram_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+cantidad_porcentaje_compra = 0.80  # 80% del saldo disponible
 
-# Funciones auxiliares
+# Funciones
+def enviar_telegram(mensaje):
+    requests.post(telegram_url, data={"chat_id": CHAT_ID, "text": mensaje})
+
 def firmar(query_string, secret_key):
     return hmac.new(secret_key.encode('utf-8'), query_string.encode('utf-8'), hashlib.sha256).hexdigest()
 
-def notificar_telegram(mensaje):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": CHAT_ID,
-        "text": mensaje,
-        "parse_mode": "Markdown"
-    }
-    try:
-        requests.post(url, data=payload)
-    except Exception as e:
-        print("Error enviando Telegram:", e)
-
-def obtener_precio_actual():
-    try:
-        url = f"https://open-api.bingx.com/openApi/spot/v1/ticker/price?symbol={PAR}"
-        respuesta = requests.get(url)
-        data = respuesta.json()
-        return float(data['data']['price'])
-    except:
-        return 0
-
 def obtener_saldo_usdt():
-    url = "https://open-api.bingx.com/openApi/spot/v1/account/assets"
-    timestamp = int(time.time() * 1000)
+    timestamp = str(int(time.time() * 1000))
     query_string = f"timestamp={timestamp}"
-    firma = firmar(query_string, SECRET_KEY)
+    signature = firmar(query_string, SECRET_KEY)
     headers = {"X-BX-APIKEY": API_KEY}
-    url_firmada = f"{url}?{query_string}&signature={firma}"
-    respuesta = requests.get(url_firmada, headers=headers)
-    data = respuesta.json()
-
+    url = f"{base_url}/openApi/user/balance?{query_string}&signature={signature}"
+    respuesta = requests.get(url, headers=headers)
+    saldo_data = respuesta.json()
     try:
-        for asset in data['data']['balances']:
+        for asset in saldo_data['data']:
             if asset['asset'] == 'USDT':
-                return float(asset['free'])
-    except:
-        print("Error saldo:", data)
+                return float(asset['balance'])
+    except Exception as e:
+        print(f"Error al obtener saldo: {e}")
+        return 0
     return 0
 
-def detectar_oportunidad():
-    precios = []
-    volumenes = []
+def obtener_datos_candlestick():
+    url = f"{base_url}/openApi/market/getKline?symbol={symbol}&interval=1m&limit=20"
+    respuesta = requests.get(url)
+    datos = respuesta.json()
+    if datos['code'] == 0:
+        return datos['data']
+    else:
+        print("Error al obtener datos del mercado")
+        return []
 
-    for _ in range(5):
-        url = f"https://open-api.bingx.com/openApi/spot/v1/market/depth?symbol={PAR}&limit=5"
-        r = requests.get(url)
-        data = r.json()
-        try:
-            mejor_precio_venta = float(data['data']['asks'][0][0])
-            mejor_precio_compra = float(data['data']['bids'][0][0])
-            volumen_compra = float(data['data']['bids'][0][1])
-            volumen_venta = float(data['data']['asks'][0][1])
-            precios.append((mejor_precio_venta + mejor_precio_compra) / 2)
-            volumenes.append(volumen_compra - volumen_venta)
-        except:
-            continue
-        time.sleep(2)
-
-    if len(precios) < 3:
+def detectar_oportunidad(candles):
+    if len(candles) < 5:
         return False
 
-    tendencia = precios[-1] > precios[0] and precios[-1] > precios[-2]
-    presion_compra = sum(1 for v in volumenes if v > 0)
+    volumenes = [float(candle['volume']) for candle in candles]
+    cierres = [float(candle['close']) for candle in candles]
 
-    return tendencia and presion_compra >= 3
+    volumen_reciente = volumenes[-1]
+    volumen_promedio = sum(volumenes[:-1]) / len(volumenes[:-1])
 
-def comprar(cantidad, precio_actual):
-    cantidad = round(cantidad / precio_actual, 0)  # SHIB cantidades
-    print(f"Compra simulada: {cantidad} SHIB a {precio_actual}")
-    return cantidad
+    # Condiciones:
+    # 1. Volumen reciente 1.5 veces mayor que el promedio
+    # 2. Última vela verde (subida de precio)
+    # 3. Mínimos crecientes en últimas 3 velas
+    if (volumen_reciente > 1.5 * volumen_promedio and
+        cierres[-1] > cierres[-2] and
+        cierres[-2] > cierres[-3] and
+        cierres[-3] > cierres[-4]):
+        return True
+    return False
 
-def monitorear_venta(precio_entrada, cantidad):
-    while True:
-        time.sleep(8)
+def comprar(cantidad_usdt):
+    timestamp = str(int(time.time() * 1000))
+    params = f"symbol={symbol}&side=BUY&type=MARKET&quoteOrderQty={cantidad_usdt}&timestamp={timestamp}"
+    signature = firmar(params, SECRET_KEY)
+    headers = {"X-BX-APIKEY": API_KEY}
+    url = f"{base_url}/openApi/spot/v1/trade/order?{params}&signature={signature}"
+    respuesta = requests.post(url, headers=headers)
+    return respuesta.json()
+
+def vender(cantidad_shib):
+    timestamp = str(int(time.time() * 1000))
+    params = f"symbol={symbol}&side=SELL&type=MARKET&quantity={cantidad_shib}&timestamp={timestamp}"
+    signature = firmar(params, SECRET_KEY)
+    headers = {"X-BX-APIKEY": API_KEY}
+    url = f"{base_url}/openApi/spot/v1/trade/order?{params}&signature={signature}"
+    respuesta = requests.post(url, headers=headers)
+    return respuesta.json()
+
+def obtener_precio_actual():
+    url = f"{base_url}/openApi/market/getPrice?symbol={symbol}"
+    respuesta = requests.get(url)
+    datos = respuesta.json()
+    if datos['code'] == 0:
+        return float(datos['data']['price'])
+    else:
+        return None
+
+# Inicio del Bot
+print("=== ZafroBot Dinámico Pro Iniciado ===")
+
+while True:
+    saldo = obtener_saldo_usdt()
+    if saldo < 5:
+        print("Saldo insuficiente para operar.")
+        time.sleep(60)
+        continue
+
+    candles = obtener_datos_candlestick()
+    if detectar_oportunidad(candles):
+        cantidad_a_usar = saldo * cantidad_porcentaje_compra
         precio_actual = obtener_precio_actual()
-
-        if precio_actual >= precio_entrada * MARGEN_GANANCIA:
-            notificar_telegram(f"✅ *¡Ganancia del 2% alcanzada!*\nNuevo saldo incrementado\nÚnete al canal oficial:\n👉 https://t.me/GanandoConZafronock")
-            break
-        elif precio_actual <= precio_entrada * STOP_LOSS:
-            notificar_telegram(f"⚡ *Stop Loss ejecutado para proteger capital!*")
-            break
-
-# BOT PRINCIPAL con reintento
-def zafrobot_dinamico_pro():
-    print("=== ZafroBot Dinámico Pro Iniciado ===")
-    notificar_telegram("🚀 *ZafroBot Dinámico Pro Iniciado*\nBuscando oportunidades...")
-
-    while True:
-        saldo = obtener_saldo_usdt()
-
-        if saldo < 3:
-            notificar_telegram("⚠️ *Saldo insuficiente para operar.*")
-            print("Saldo insuficiente. Bot pausado.")
-            time.sleep(600)  # 10 minutos
+        if not precio_actual:
+            time.sleep(60)
             continue
+        
+        respuesta_compra = comprar(cantidad_a_usar)
+        print(f"Compra ejecutada: {respuesta_compra}")
 
-        oportunidad = detectar_oportunidad()
+        # Esperar subida de 1% o stop loss de -2%
+        precio_compra = obtener_precio_actual()
+        objetivo = precio_compra * 1.01
+        stop_loss = precio_compra * 0.98
 
-        if oportunidad:
-            capital = saldo * 0.80
+        while True:
             precio_actual = obtener_precio_actual()
-            cantidad = comprar(capital, precio_actual)
-
-            notificar_telegram(f"🟢 *Compra ejecutada*\nCantidad: `{cantidad}` tokens\nPrecio: `{precio_actual}`\nEsperando venta...")
-            monitorear_venta(precio_actual, cantidad)
-            break
-        else:
-            print("No hay oportunidad. Reintentando en 5 minutos...")
-            notificar_telegram("⏳ *No hay oportunidad segura. Reintentando en 5 minutos...*")
-            time.sleep(300)  # 5 minutos
-
-# Ejecutar bot
-if __name__ == "__main__":
-    zafrobot_dinamico_pro()
+            if precio_actual >= objetivo:
+                cantidad_shib = cantidad_a_usar / precio_compra
+                respuesta_venta = vender(cantidad_shib)
+                enviar_telegram(f"¡Venta exitosa en ganancia! Precio: {precio_actual:.8f}")
+                print(f"Venta exitosa: {respuesta_venta}")
+                break
+            elif precio_actual <= stop_loss:
+                cantidad_shib = cantidad_a_usar / precio_compra
+                respuesta_venta = vender(cantidad_shib)
+                enviar_telegram(f"Venta por stop loss activado. Precio: {precio_actual:.8f}")
+                print(f"Venta por stop loss: {respuesta_venta}")
+                break
+            time.sleep(5)
+    else:
+        print("No hay oportunidad segura. Analizando...")
+    
+    time.sleep(20)
