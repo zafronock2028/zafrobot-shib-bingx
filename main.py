@@ -1,131 +1,127 @@
 import os
 import time
 import requests
-import hmac
-import hashlib
-import json
+from binance.spot import Spot
 
-# Variables de entorno (Render)
-API_KEY = os.getenv('API_KEY')
-API_SECRET = os.getenv('API_SECRET')
-TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
-TELEGRAM_CHAT_ID = os.getenv('CHAT_ID')
+# Variables de entorno
+API_KEY = os.getenv("BINANCE_API_KEY")
+API_SECRET = os.getenv("BINANCE_API_SECRET")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 # Configuración
-PAIR = 'SHIB_USDT'
-SPOT_URL = 'https://open-api.bingx.com/openApi/spot/v1'
-HEADERS = {'X-BX-APIKEY': API_KEY}
-TAKE_PROFIT = 1.015  # 1.5% arriba
-STOP_LOSS = 0.98     # 2% abajo
-PERCENTAGE_TO_USE = 0.8  # 80% del saldo disponible
-CHECK_INTERVAL = 10  # segundos
+PAIR = "SHIBUSDT"
+TAKE_PROFIT_PERCENT = 1.5  # Porcentaje de ganancia
+STOP_LOSS_PERCENT = 2.0    # Porcentaje de pérdida
+CHECK_INTERVAL = 10        # Segundos entre análisis
 
-# Función para enviar mensaje a Telegram
-def send_telegram(message):
+# Conexión con Binance Spot
+client = Spot(key=API_KEY, secret=API_SECRET)
+
+# Función para enviar mensajes a Telegram
+def send_telegram_message(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    data = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
-    try:
-        requests.post(url, data=data)
-    except Exception as e:
-        print(f"Error enviando Telegram: {e}")
-
-# Función para firmar solicitudes
-def sign_request(params):
-    query_string = '&'.join([f"{key}={params[key]}" for key in sorted(params)])
-    signature = hmac.new(API_SECRET.encode('utf-8'), query_string.encode('utf-8'), hashlib.sha256).hexdigest()
-    return signature
-
-# Obtener saldo disponible en USDT
-def get_balance():
-    timestamp = str(int(time.time() * 1000))
-    params = {'timestamp': timestamp}
-    params['signature'] = sign_request(params)
-    response = requests.get(f"{SPOT_URL}/account/balance", headers=HEADERS, params=params)
-    balances = response.json()
-    if balances['code'] == 0:
-        for asset in balances['data']['balances']:
-            if asset['asset'] == 'USDT':
-                return float(asset['free'])
-    return 0
-
-# Obtener precio actual de SHIB
-def get_price():
-    response = requests.get(f"https://open-api.bingx.com/openApi/spot/v1/ticker/price?symbol={PAIR}")
-    price_info = response.json()
-    if price_info['code'] == 0:
-        return float(price_info['data']['price'])
-    return None
-
-# Crear orden spot market
-def create_order(side, quantity):
-    timestamp = str(int(time.time() * 1000))
-    params = {
-        'symbol': PAIR,
-        'side': side,
-        'type': 'MARKET',
-        'quantity': quantity,
-        'timestamp': timestamp
+    payload = {
+        "chat_id": CHAT_ID,
+        "text": message,
+        "parse_mode": "Markdown"
     }
-    params['signature'] = sign_request(params)
-    response = requests.post(f"{SPOT_URL}/order", headers=HEADERS, params=params)
-    return response.json()
+    try:
+        requests.post(url, data=payload)
+    except Exception as e:
+        print(f"Error enviando mensaje Telegram: {e}")
 
-# Análisis profesional simple para oportunidad
-def detect_opportunity(current_price):
-    # Placeholder sencillo: podríamos agregar análisis real más avanzado aquí
-    return True  # Simula siempre oportunidad (podemos sofisticarlo después)
+# Función para obtener el saldo USDT
+def get_usdt_balance():
+    account_info = client.account()
+    for balance in account_info['balances']:
+        if balance['asset'] == 'USDT':
+            return float(balance['free'])
+    return 0.0
 
-# BOT principal
+# Función para obtener el precio actual de SHIB/USDT
+def get_current_price():
+    ticker = client.ticker_price(symbol=PAIR)
+    return float(ticker['price'])
+
+# Inicio del bot
+send_telegram_message("🚀 *ZafroBot Dinámico Pro iniciado con éxito!*")
+usdt_balance = get_usdt_balance()
+send_telegram_message(f"💰 *Saldo detectado en Spot:* ${usdt_balance:.2f} *USDT*")
+
+# Función principal de trading
 def main():
     while True:
         try:
-            balance = get_balance()
-            if balance <= 0:
-                print("Sin saldo suficiente, esperando...")
+            usdt_balance = get_usdt_balance()
+            if usdt_balance < 1:
+                send_telegram_message("⚠️ *Saldo insuficiente para operar.*")
                 time.sleep(60)
                 continue
 
-            usdt_to_use = balance * PERCENTAGE_TO_USE
-            current_price = get_price()
-            if current_price is None:
-                print("No se pudo obtener precio actual, reintentando...")
-                time.sleep(30)
-                continue
+            current_price = get_current_price()
 
-            if detect_opportunity(current_price):
-                send_telegram("🚀 ¡Oportunidad detectada! Entrada probable segura en SHIB/USDT. Analizando ejecución...")
+            # Lógica de entrada profesional simulada
+            if analizar_entrada_segura(current_price):
+                cantidad_a_comprar = (usdt_balance * 0.80) / current_price
 
-                quantity = round(usdt_to_use / current_price, 0)  # Ajusta según cantidad permitida
-                order = create_order('BUY', quantity)
-                if order.get('code') == 0:
-                    entry_price = current_price
-                    send_telegram("✅ Compra ejecutada en Market. Monitoreando para salida con +1.5%...")
+                # Comprar SHIB
+                order = client.new_order(
+                    symbol=PAIR,
+                    side="BUY",
+                    type="MARKET",
+                    quantity=round(cantidad_a_comprar, 0)
+                )
+                buy_price = float(order['fills'][0]['price'])
+                send_telegram_message(f"🛒 *Compra ejecutada* a ${buy_price:.8f}")
 
-                    take_profit_price = round(entry_price * TAKE_PROFIT, 8)
-                    stop_loss_price = round(entry_price * STOP_LOSS, 8)
+                objetivo_take_profit = buy_price * (1 + TAKE_PROFIT_PERCENT / 100)
+                objetivo_stop_loss = buy_price * (1 - STOP_LOSS_PERCENT / 100)
 
-                    while True:
-                        price = get_price()
-                        if price is None:
-                            continue
+                # Monitorear operación
+                while True:
+                    current_price = get_current_price()
 
-                        if price >= take_profit_price:
-                            create_order('SELL', quantity)
-                            send_telegram("🎯 Venta ejecutada en ganancia +1.5%. ¡Ganancia asegurada!")
-                            break
+                    if current_price >= objetivo_take_profit:
+                        sell_quantity = sum(float(fill['qty']) for fill in order['fills'])
+                        client.new_order(
+                            symbol=PAIR,
+                            side="SELL",
+                            type="MARKET",
+                            quantity=round(sell_quantity, 0)
+                        )
+                        send_telegram_message(f"✅ *Take Profit alcanzado!* Precio: ${current_price:.8f}")
+                        break
 
-                        if price <= stop_loss_price:
-                            create_order('SELL', quantity)
-                            send_telegram("⚠️ Stop Loss ejecutado. Pérdida controlada.")
-                            break
+                    elif current_price <= objetivo_stop_loss:
+                        sell_quantity = sum(float(fill['qty']) for fill in order['fills'])
+                        client.new_order(
+                            symbol=PAIR,
+                            side="SELL",
+                            type="MARKET",
+                            quantity=round(sell_quantity, 0)
+                        )
+                        send_telegram_message(f"🛑 *Stop Loss activado!* Precio: ${current_price:.8f}")
+                        break
 
-                        time.sleep(CHECK_INTERVAL)
+                    time.sleep(5)
+
+            else:
+                print("Esperando oportunidad...")
 
             time.sleep(CHECK_INTERVAL)
 
         except Exception as e:
-            print(f"Error general: {e}")
+            send_telegram_message(f"⚠️ *Error en ejecución:* {e}")
             time.sleep(60)
 
+# Función simulada de análisis de entrada segura
+def analizar_entrada_segura(current_price):
+    # Aquí normalmente iría el análisis profesional.
+    # De momento simulamos 80% de probabilidad de entrada segura.
+    import random
+    return random.random() < 0.8  # 80% chance de entrada (para pruebas)
+
+# Ejecutar bot
 if __name__ == "__main__":
     main()
