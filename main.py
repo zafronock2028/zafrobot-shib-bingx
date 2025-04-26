@@ -1,38 +1,33 @@
-import os
-import asyncio
-from aiogram import Bot, Dispatcher, types
-from aiohttp import web
+import hmac
+import hashlib
+import time
 
-# Variables de entorno
-API_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-CHAT_ID = os.getenv('CHAT_ID')
+async def obtener_saldo():
+    url = "https://open-api.bingx.com/openApi/user/spot/assets"
+    timestamp = str(int(time.time() * 1000))
+    params = f"timestamp={timestamp}"
 
-# Crear bot y dispatcher
-bot = Bot(token=API_TOKEN)
-dp = Dispatcher()
+    sign = hmac.new(
+        BINGX_API_SECRET.encode('utf-8'),
+        params.encode('utf-8'),
+        hashlib.sha256
+    ).hexdigest()
 
-# Función que envía el mensaje de prueba
-async def enviar_mensaje_test():
-    while True:
-        try:
-            await bot.send_message(chat_id=CHAT_ID, text="✅ Test funcionando correctamente.")
-        except Exception as e:
-            print(f"Error enviando mensaje: {e}")
-        await asyncio.sleep(60)  # Espera 60 segundos antes de enviar otro
+    headers = {
+        "X-BX-APIKEY": BINGX_API_KEY,
+    }
 
-# Ruta raíz para comprobar que el bot está vivo
-async def handle(request):
-    return web.Response(text="Bot funcionando correctamente.")
+    url_final = f"{url}?{params}&signature={sign}"
 
-# Función principal para arrancar todo
-async def start_bot():
-    asyncio.create_task(enviar_mensaje_test())  # Crea tarea de enviar mensaje cada minuto
-
-# Configurar servidor web
-app = web.Application()
-app.router.add_get('/', handle)
-
-if __name__ == '__main__':
-    loop = asyncio.get_event_loop()
-    loop.create_task(start_bot())
-    web.run_app(app, host='0.0.0.0', port=5000)
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url_final, headers=headers) as response:
+                data = await response.json()
+                if data['code'] == 0:
+                    for asset in data['data']['assets']:
+                        if asset['asset'] == 'USDT':
+                            return float(asset['balance'])
+                return None
+    except Exception as e:
+        print(f"Error al obtener saldo: {e}")
+        return None
