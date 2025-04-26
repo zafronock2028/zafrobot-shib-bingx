@@ -1,29 +1,30 @@
 import asyncio
 import os
-from aiogram import Bot, Dispatcher, types
-from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode
-from flask import Flask
 import requests
+from flask import Flask
+from aiogram import Bot, Dispatcher, types
+from aiogram.filters import Command
+from aiogram.enums import ParseMode
+from aiogram.client.default import DefaultBotProperties
 
-# Cargar las variables de entorno
+# Variables de entorno
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 API_KEY = os.getenv("API_KEY")
 SECRET_KEY = os.getenv("SECRET_KEY")
 CHAT_ID = os.getenv("CHAT_ID")
 
-# Crear el bot correctamente para AIOGRAM v3
+# Configuración de Bot
 bot = Bot(token=TELEGRAM_BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
-# Crear la app Flask (para que Render no lo cierre por inactividad)
+# Configuración de Flask para mantener Render activo
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "ZafroBot Dinámico Pro está activo."
+    return "ZafroBot Dinámico Pro activo."
 
-# Función para obtener el saldo
+# Función para obtener saldo Spot
 async def obtener_saldo():
     try:
         url = "https://open-api.bingx.com/openApi/spot/v1/account/assets"
@@ -32,8 +33,7 @@ async def obtener_saldo():
         }
         response = requests.get(url, headers=headers)
         data = response.json()
-        
-        # Buscar el saldo en USDT
+
         if data["code"] == 0:
             balances = data["data"]["balances"]
             for balance in balances:
@@ -47,8 +47,8 @@ async def obtener_saldo():
         print(f"Error obteniendo saldo: {e}")
         return None
 
-# Manejador de comando /start
-@dp.message(commands=["start"])
+# Comando /start
+@dp.message(Command("start"))
 async def start_handler(message: types.Message):
     await message.answer("✅ Bot vinculado correctamente. Consultando saldo...")
 
