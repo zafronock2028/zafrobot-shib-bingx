@@ -3,23 +3,24 @@ import requests
 import hmac
 import hashlib
 import time
+import asyncio
 from telegram import Bot
 
-# Datos de entorno
+# Variables de entorno
 API_KEY = os.getenv("API_KEY")
 SECRET_KEY = os.getenv("SECRET_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
-# Inicializar bot de Telegram
+# Inicializar Bot
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
-# Función para firmar los parámetros
+# Firmar parámetros
 def firmar_parametros(params):
     query_string = '&'.join([f"{key}={params[key]}" for key in sorted(params)])
     return hmac.new(SECRET_KEY.encode('utf-8'), query_string.encode('utf-8'), hashlib.sha256).hexdigest()
 
-# Función para obtener saldo
+# Obtener saldo
 def obtener_saldo():
     url = "https://open-api.bingx.com/openApi/spot/v1/account/balance"
     timestamp = str(int(time.time() * 1000))
@@ -45,18 +46,25 @@ def obtener_saldo():
         print(f"Error procesando saldo: {e}")
         return None
 
-# Función para enviar el mensaje de inicio
-def enviar_mensaje_inicio(saldo):
+# Función asíncrona para enviar mensaje
+async def enviar_mensaje_inicio(saldo):
     if saldo is not None:
-        mensaje = f"✅ ¡Bot activo!\n💰 Saldo disponible: ${saldo:.2f}"
+        mensaje = (
+            "✅ *ZafroBot Iniciado*\n"
+            "------------------------\n"
+            f"💳 *Saldo disponible:* `${saldo:.2f}` *USDT*\n"
+            "------------------------\n"
+            "⚡ ¡Listo para operar!"
+        )
     else:
-        mensaje = "⚠️ Bot activo, pero no se pudo obtener el saldo."
-    bot.send_message(chat_id=CHAT_ID, text=mensaje)
+        mensaje = "⚠️ *Bot activo, pero no se pudo obtener el saldo.*"
+    
+    await bot.send_message(chat_id=CHAT_ID, text=mensaje, parse_mode="Markdown")
 
 # Función principal
-def main():
+async def main():
     saldo = obtener_saldo()
-    enviar_mensaje_inicio(saldo)
+    await enviar_mensaje_inicio(saldo)
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
