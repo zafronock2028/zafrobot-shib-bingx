@@ -1,60 +1,68 @@
-import os
 import requests
+import time
 import hmac
 import hashlib
-import time
-import asyncio
+import os
+import json
 from telegram import Bot
 
-API_KEY = os.getenv("API_KEY")
-SECRET_KEY = os.getenv("SECRET_KEY")
-CHAT_ID = os.getenv("CHAT_ID")
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+# Variables de entorno
+API_KEY = os.getenv('API_KEY')
+SECRET_KEY = os.getenv('SECRET_KEY')
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+CHAT_ID = os.getenv('CHAT_ID')
 
+# Inicializar el bot de Telegram
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
+
+# Función para enviar mensajes a Telegram
+def enviar_mensaje(mensaje):
+    try:
+        bot.send_message(chat_id=CHAT_ID, text=mensaje)
+    except Exception as e:
+        print(f"Error enviando mensaje: {e}")
 
 # Función para firmar los parámetros
 def firmar_parametros(params):
-    query_string = '&'.join([f"{key}={params[key]}" for key in sorted(params)])
+    query_string = '&'.join([f"{key}={value}" for key, value in params.items()])
     signature = hmac.new(SECRET_KEY.encode('utf-8'), query_string.encode('utf-8'), hashlib.sha256).hexdigest()
     return signature
 
 # Función para obtener saldo
-async def obtener_saldo():
+def obtener_saldo():
+    url = 'https://open-api.bingx.com/openApi/spot/v1/account/assets'
+    timestamp = str(int(time.time() * 1000))
+    params = {
+        'timestamp': timestamp
+    }
+    params['signature'] = firmar_parametros(params)
+    headers = {
+        'X-BX-APIKEY': API_KEY
+    }
     try:
-        url = "https://api-swap-rest.bingx.com/openApi/swap/v2/user/balance"
-        params = {
-            "apiKey": API_KEY,
-            "timestamp": str(int(time.time() * 1000)),
-        }
-        params["signature"] = firmar_parametros(params)
-
-        response = requests.get(url, params=params)
+        response = requests.get(url, params=params, headers=headers)
         data = response.json()
-
-        if data["code"] == 0:
-            saldo = data["data"]["balance"]
-            return saldo
+        if 'data' in data:
+            for asset in data['data']['balances']:
+                if asset['asset'] == 'USDT':
+                    return float(asset['free'])
         else:
-            print("Error en la respuesta:", data)
+            print(f"Error en respuesta de saldo: {data}")
             return None
     except Exception as e:
-        print("Error obteniendo balance:", str(e))
+        print(f"Error obteniendo balance: {e}")
         return None
 
-# Función para enviar mensaje a Telegram
-async def enviar_mensaje(texto):
-    await bot.send_message(chat_id=CHAT_ID, text=texto)
-
 # Función principal
-async def main():
-    saldo = await obtener_saldo()
-    if saldo is not None:
-        mensaje = f"✅ Bot iniciado correctamente.\nSaldo actual disponible: {saldo} USDT."
-    else:
-        mensaje = "⚠️ Bot iniciado, pero no se pudo obtener el saldo."
-    
-    await enviar_mensaje(mensaje)
+def main():
+    enviar_mensaje("✅ Bot iniciado correctamente.")
+    while True:
+        saldo = obtener_saldo()
+        if saldo is not None:
+            print(f"Saldo actual: {saldo} USDT")
+        else:
+            print("No se pudo obtener el saldo.")
+        time.sleep(60)  # Esperar 1 minuto antes de volver a consultar
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
