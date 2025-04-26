@@ -1,4 +1,4 @@
-aiohttp
 aiogram
+aiohttp
 requests
 flask
