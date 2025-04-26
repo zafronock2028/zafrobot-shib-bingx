@@ -1,130 +1,175 @@
 import requests
 import time
-import hmac
 import hashlib
+import hmac
 import os
-import json
 
-# Variables de entorno (en Render)
-API_KEY = os.getenv('BINGX_API_KEY')
-SECRET_KEY = os.getenv('BINGX_SECRET_KEY')
-TELEGRAM_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
+# Claves desde variables de entorno en Render
+API_KEY = os.getenv("API_KEY")
+SECRET_KEY = os.getenv("SECRET_KEY")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("CHAT_ID")
 
-# Parámetros
-PAR_TRADING = "SHIB-USDT"
-PORCENTAJE_ENTRADA = 0.80
-TAKE_PROFIT = 1.02  # 2% de ganancia
-STOP_LOSS = 0.98    # 2% de pérdida
+SYMBOL = "SHIB-USDT"
+PRECISION = 6  # Número de decimales para SHIB
+MONEDA_OBJETIVO = "USDT"
 
-def enviar_telegram(mensaje):
+# === Función para enviar notificación a Telegram ===
+def notificar_telegram(mensaje):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {
-        "chat_id": CHAT_ID,
+        "chat_id": TELEGRAM_CHAT_ID,
         "text": mensaje,
         "parse_mode": "Markdown"
     }
     try:
-        requests.post(url, json=payload)
-    except Exception as e:
-        print(f"Error enviando mensaje a Telegram: {e}")
+        requests.post(url, data=payload)
+    except:
+        print("Error al enviar notificación Telegram")
 
+# === Firma de solicitudes HMAC ===
 def firmar(query_string, secret_key):
-    return hmac.new(secret_key.encode('utf-8'), query_string.encode('utf-8'), hashlib.sha256).hexdigest()
+    return hmac.new(
+        secret_key.encode("utf-8"),
+        query_string.encode("utf-8"),
+        hashlib.sha256
+    ).hexdigest()
 
+# === Obtener saldo disponible USDT ===
 def obtener_saldo_usdt():
-    url = "https://open-api.bingx.com/openApi/swap/v2/user/balance"
+    url = "https://open-api.bingx.com/openApi/user/balance"
     timestamp = str(int(time.time() * 1000))
     query_string = f"timestamp={timestamp}"
     signature = firmar(query_string, SECRET_KEY)
+
     headers = {
         "X-BX-APIKEY": API_KEY
     }
-    response = requests.get(f"{url}?{query_string}&signature={signature}", headers=headers)
-    data = response.json()
-    if data.get('code') != 0:
-        print(f"Error al obtener saldo: {data}")
-        return 0
-    for asset in data['data']['balances']:
-        if asset['asset'] == "USDT":
-            return float(asset['balance'])
-    return 0
 
+    params = {
+        "timestamp": timestamp,
+        "signature": signature
+    }
+
+    try:
+        response = requests.get(url, headers=headers, params=params)
+        data = response.json()
+        for asset in data['data']['balances']:
+            if asset['asset'] == MONEDA_OBJETIVO:
+                return float(asset['free'])
+    except Exception as e:
+        print("Error al obtener saldo:", e)
+
+    return 0.0
+
+# === Obtener precio actual de SHIB ===
 def obtener_precio_actual():
-    url = f"https://open-api.bingx.com/openApi/spot/v1/ticker/price?symbol={PAR_TRADING}"
-    response = requests.get(url)
-    data = response.json()
-    return float(data['data']['price'])
+    url = f"https://open-api.bingx.com/openApi/market/ticker?symbol={SYMBOL}"
+    try:
+        response = requests.get(url)
+        return float(response.json()['data'][0]['price'])
+    except Exception as e:
+        print("Error al obtener precio:", e)
+        return 0.0
 
-def colocar_orden_compra(cantidad):
+# === Crear orden de compra ===
+def crear_orden_compra(cantidad, precio):
     url = "https://open-api.bingx.com/openApi/spot/v1/trade/order"
     timestamp = str(int(time.time() * 1000))
+
     body = {
-        "symbol": PAR_TRADING,
+        "symbol": SYMBOL,
         "side": "BUY",
-        "type": "MARKET",
+        "type": "LIMIT",
+        "price": round(precio, PRECISION),
         "quantity": cantidad,
         "timestamp": timestamp
     }
-    query_string = '&'.join([f"{key}={body[key]}" for key in body])
-    signature = firmar(query_string, SECRET_KEY)
-    headers = {
-        "X-BX-APIKEY": API_KEY,
-        "Content-Type": "application/json"
-    }
-    response = requests.post(f"{url}?signature={signature}", headers=headers, json=body)
-    return response.json()
 
-def colocar_orden_venta(cantidad):
+    query_string = '&'.join([f"{k}={body[k]}" for k in body])
+    signature = firmar(query_string, SECRET_KEY)
+
+    headers = {
+        "X-BX-APIKEY": API_KEY
+    }
+
+    body["signature"] = signature
+    try:
+        response = requests.post(url, headers=headers, data=body)
+        print("Orden de compra enviada:", response.json())
+        return True
+    except Exception as e:
+        print("Error al crear orden:", e)
+        return False
+
+# === Crear orden de venta ===
+def crear_orden_venta(cantidad, precio):
     url = "https://open-api.bingx.com/openApi/spot/v1/trade/order"
     timestamp = str(int(time.time() * 1000))
+
     body = {
-        "symbol": PAR_TRADING,
+        "symbol": SYMBOL,
         "side": "SELL",
-        "type": "MARKET",
+        "type": "LIMIT",
+        "price": round(precio, PRECISION),
         "quantity": cantidad,
         "timestamp": timestamp
     }
-    query_string = '&'.join([f"{key}={body[key]}" for key in body])
-    signature = firmar(query_string, SECRET_KEY)
-    headers = {
-        "X-BX-APIKEY": API_KEY,
-        "Content-Type": "application/json"
-    }
-    response = requests.post(f"{url}?signature={signature}", headers=headers, json=body)
-    return response.json()
 
+    query_string = '&'.join([f"{k}={body[k]}" for k in body])
+    signature = firmar(query_string, SECRET_KEY)
+
+    headers = {
+        "X-BX-APIKEY": API_KEY
+    }
+
+    body["signature"] = signature
+    try:
+        response = requests.post(url, headers=headers, data=body)
+        print("Orden de venta enviada:", response.json())
+        return True
+    except Exception as e:
+        print("Error al vender:", e)
+        return False
+
+# === BOT DINÁMICO PRO ===
 def zafrobot_dinamico_pro():
     print("=== ZafroBot Dinámico Pro Iniciado ===")
+
     saldo = obtener_saldo_usdt()
-    if saldo < 5:
+    if saldo < 3:
         print("Saldo insuficiente para operar.")
-        enviar_telegram("⚠️ *Saldo insuficiente para operar.*")
+        notificar_telegram("⚠️ *Saldo insuficiente para operar.*")
         return
 
-    capital_uso = saldo * PORCENTAJE_ENTRADA
-    precio_inicio = obtener_precio_actual()
-    print(f"Precio inicial: {precio_inicio}")
+    capital = saldo * 0.80
+    precio_entrada = obtener_precio_actual()
 
-    cantidad_token = capital_uso / precio_inicio
-    colocar_orden_compra(cantidad_token)
-    enviar_telegram(f"✅ *Compra realizada*\nPrecio: {precio_inicio}")
+    if precio_entrada == 0:
+        print("No se pudo obtener el precio.")
+        return
+
+    cantidad = round(capital / precio_entrada, PRECISION)
+    crear_orden_compra(cantidad, precio_entrada)
+    notificar_telegram(f"🟢 *Compra ejecutada en SHIB*\nCantidad: `{cantidad}`\nPrecio: `{precio_entrada}`")
+
+    take_profit = precio_entrada * 1.02
+    stop_loss = precio_entrada * 0.97
 
     while True:
-        time.sleep(10)
         precio_actual = obtener_precio_actual()
-        print(f"Precio actual: {precio_actual}")
-
-        if precio_actual >= precio_inicio * TAKE_PROFIT:
-            colocar_orden_venta(cantidad_token)
-            nuevo_saldo = obtener_saldo_usdt()
-            enviar_telegram(f"✨ *¡Operación ganada!*\nGanancia: +2%\nNuevo saldo: ${nuevo_saldo:.2f}\nÚnete al canal: https://t.me/GanandoConZafronock")
+        if precio_actual >= take_profit:
+            crear_orden_venta(cantidad, precio_actual)
+            ganancia = capital * 0.02
+            saldo_final = saldo + ganancia
+            notificar_telegram(f"✅ *Ganancia tomada:* +2%\nNuevo saldo: `${saldo_final:.2f}`\nÚnete al canal: https://t.me/GanandoConZafronock")
             break
-        elif precio_actual <= precio_inicio * STOP_LOSS:
-            colocar_orden_venta(cantidad_token)
-            nuevo_saldo = obtener_saldo_usdt()
-            enviar_telegram(f"⚡ *¡Stop Loss activado!*\nPérdida controlada\nNuevo saldo: ${nuevo_saldo:.2f}\nÚnete al canal: https://t.me/GanandoConZafronock")
+        elif precio_actual <= stop_loss:
+            crear_orden_venta(cantidad, precio_actual)
+            notificar_telegram("❌ *Stop Loss activado, operación cerrada para proteger capital*")
             break
+        time.sleep(10)
 
+# === EJECUCIÓN PRINCIPAL ===
 if __name__ == "__main__":
     zafrobot_dinamico_pro()
