@@ -3,33 +3,26 @@ import time
 import hmac
 import hashlib
 import requests
-import threading
-import datetime
 from flask import Flask
 from telegram import Bot
 
 # Variables de entorno
-API_KEY = os.getenv('API_KEY')
-SECRET_KEY = os.getenv('SECRET_KEY')
-TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-CHAT_ID = os.getenv('CHAT_ID')
-
-# Configuración
-PAIR = "SHIB-USDT"
+API_KEY = os.getenv("API_KEY")
+SECRET_KEY = os.getenv("SECRET_KEY")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
 BASE_URL = "https://open-api.bingx.com"
+
+# Configuración inicial
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
-app = Flask(__name__)
-
-# Estado del bot
+par = "SHIB-USDT"
+profit_total = 0.0
 operacion_abierta = False
-precio_compra = 0
-contador_operaciones = 0
-ganancia_total = 0.0
 
+# Funciones
 def firmar_parametros(params):
-    query_string = '&'.join([f"{key}={params[key]}" for key in sorted(params)])
-    signature = hmac.new(SECRET_KEY.encode('utf-8'), query_string.encode('utf-8'), hashlib.sha256).hexdigest()
-    return signature
+    query_string = "&".join([f"{key}={params[key]}" for key in sorted(params)])
+    return hmac.new(SECRET_KEY.encode('utf-8'), query_string.encode('utf-8'), hashlib.sha256).hexdigest()
 
 def obtener_saldo():
     timestamp = int(time.time() * 1000)
@@ -41,93 +34,82 @@ def obtener_saldo():
         "X-BX-APIKEY": API_KEY
     }
     try:
-        response = requests.get(f"{BASE_URL}/openApi/wallet/balance", headers=headers, params=params)
+        response = requests.get(f"{BASE_URL}/openApi/wallet/v1/balance", headers=headers, params=params)
         data = response.json()
-        for balance in data['data']['balance']:
-            if balance['asset'] == 'USDT':
-                return float(balance['available'])
+        if 'data' in data and 'balances' in data['data']:
+            for balance in data['data']['balances']:
+                if balance['asset'] == 'USDT':
+                    return float(balance['availableBalance'])
     except Exception as e:
         print(f"Error obteniendo balance: {e}")
     return None
 
-def obtener_precio():
+def obtener_precio_actual():
     try:
-        response = requests.get(f"{BASE_URL}/openApi/spot/v1/ticker/price?symbol={PAIR.replace('-', '')}")
+        response = requests.get(f"{BASE_URL}/openApi/spot/v1/ticker/price?symbol={par}")
         data = response.json()
         return float(data['data']['price'])
     except Exception as e:
         print(f"Error obteniendo precio: {e}")
-    return None
+        return None
 
-def enviar_mensaje(texto):
+def enviar_mensaje(mensaje):
     try:
-        bot.send_message(chat_id=CHAT_ID, text=texto)
+        bot.send_message(chat_id=CHAT_ID, text=mensaje)
     except Exception as e:
         print(f"Error enviando mensaje: {e}")
 
-def comprar():
-    global operacion_abierta, precio_compra
-    saldo = obtener_saldo()
-    if saldo is None:
-        enviar_mensaje("⚠️ Bot iniciado, pero no se pudo obtener el saldo.")
-        return
-    usdt_disponible = saldo * 0.8
-    precio_actual = obtener_precio()
-    if precio_actual:
-        cantidad = usdt_disponible / precio_actual
-        operacion_abierta = True
-        precio_compra = precio_actual
-        enviar_mensaje(f"✅ ¡Compra realizada!\n\nComprado a ${precio_actual:.8f}\nCantidad: {cantidad:.0f} {PAIR.split('-')[0]}")
+# Mensaje de inicio
+saldo_inicial = obtener_saldo()
+if saldo_inicial:
+    enviar_mensaje(f"✅ ZafroBot Iniciado\n\n💳 Saldo disponible: ${saldo_inicial:.2f} USDT\n⚡ ¡Listo para operar!")
+else:
+    enviar_mensaje("⚠️ Bot iniciado, pero no se pudo obtener el saldo.")
 
-def vender(precio_actual, ganancia):
-    global operacion_abierta, precio_compra, contador_operaciones, ganancia_total
-    operacion_abierta = False
-    contador_operaciones += 1
-    ganancia_total += ganancia
-    if ganancia >= 0:
-        enviar_mensaje(f"✅ ¡Operación cerrada! Vendido a ${precio_actual:.8f}.\nGanancia: +${ganancia:.2f} ✅\n\n💰Saldo actualizado: {obtener_saldo():.2f} USDT")
-    else:
-        enviar_mensaje(f"❌ ¡Operación cerrada con pérdida! Vendido a ${precio_actual:.8f}.\nPérdida: -${abs(ganancia):.2f} ❌\n\n💰Saldo actualizado: {obtener_saldo():.2f} USDT")
-
-def evaluar_operacion():
-    global operacion_abierta, precio_compra
-    while True:
-        if not operacion_abierta:
-            comprar()
-        else:
-            precio_actual = obtener_precio()
-            if precio_actual:
-                cambio = (precio_actual - precio_compra) / precio_compra
-                if cambio >= 0.015:  # +1.5%
-                    saldo = obtener_saldo()
-                    vender(precio_actual, saldo * 0.015)
-                elif cambio <= -0.02:  # -2%
-                    saldo = obtener_saldo()
-                    vender(precio_actual, saldo * -0.02)
-        time.sleep(5)
-
-def resumen_diario():
-    global contador_operaciones, ganancia_total
-    while True:
-        ahora = datetime.datetime.now()
-        segundos_hasta_medianoche = (86400 - (ahora.hour * 3600 + ahora.minute * 60 + ahora.second))
-        time.sleep(segundos_hasta_medianoche)
-        enviar_mensaje(f"🧾 Resumen del día:\n\nTrades cerrados: {contador_operaciones}\nGanancia total: ${ganancia_total:.2f} USDT")
-        contador_operaciones = 0
-        ganancia_total = 0.0
+# Flask app para mantener Render activo
+app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "ZafroBot Dinámico Pro está activo."
+    return "ZafroBot is running!"
 
-if __name__ == "__main__":
-    # Enviar mensaje inicial de saldo
-    saldo_inicial = obtener_saldo()
-    if saldo_inicial:
-        enviar_mensaje(f"✅ ZafroBot Iniciado\n\n💵 Saldo disponible: ${saldo_inicial:.2f} USDT\n\n⚡ ¡Listo para operar!")
-    else:
-        enviar_mensaje("⚠️ Bot iniciado, pero no se pudo obtener el saldo.")
+# Lógica principal del bot
+def bot_loop():
+    global operacion_abierta
+    global profit_total
 
-    threading.Thread(target=evaluar_operacion).start()
-    threading.Thread(target=resumen_diario).start()
+    while True:
+        if not operacion_abierta:
+            saldo_actual = obtener_saldo()
+            if saldo_actual and saldo_actual > 5:  # Mínimo requerido para operar
+                precio_compra = obtener_precio_actual()
+                if precio_compra:
+                    enviar_mensaje(f"🟢 Compra ejecutada a ${precio_compra:.8f}")
+                    operacion_abierta = True
+                    precio_objetivo = precio_compra * 1.015  # Ganancia 1.5%
+                    precio_stop = precio_compra * 0.98       # Pérdida -2%
+
+                    while operacion_abierta:
+                        precio_actual = obtener_precio_actual()
+                        if precio_actual:
+                            if precio_actual >= precio_objetivo:
+                                ganancia = saldo_actual * 0.015
+                                profit_total += ganancia
+                                enviar_mensaje(f"✅ ¡Operación cerrada! Vendido a ${precio_actual:.8f}\nGanancia asegurada.\n💰 Saldo actual: ${obtener_saldo():.2f}")
+                                enviar_mensaje(f"Trade PROFIT ✅\nProfit Diario: ${profit_total:.2f}")
+                                operacion_abierta = False
+                            elif precio_actual <= precio_stop:
+                                perdida = saldo_actual * 0.02
+                                profit_total -= perdida
+                                enviar_mensaje(f"❌ ¡Stop Loss ejecutado! Vendido a ${precio_actual:.8f}\nPérdida registrada.\n💰 Saldo actual: ${obtener_saldo():.2f}")
+                                enviar_mensaje(f"Trade LOSS ❌\nProfit Diario: ${profit_total:.2f}")
+                                operacion_abierta = False
+                        time.sleep(5)
+            else:
+                print("Saldo insuficiente para operar.")
+        time.sleep(10)
+
+if __name__ == '__main__':
+    import threading
+    threading.Thread(target=bot_loop).start()
     app.run(host='0.0.0.0', port=10000)
