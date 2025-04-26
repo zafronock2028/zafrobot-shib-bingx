@@ -1,40 +1,26 @@
-from flask import Flask
-from threading import Thread
+from aiogram import Bot, Dispatcher, executor, types
 import os
-import time
-import requests
-from aiogram import Bot, Dispatcher, types
-import asyncio
+from keep_alive import keep_alive
 
-# --- Keep Alive ---
-app = Flask('')
-
-@app.route('/')
-def home():
-    return "ZafroBot está funcionando correctamente."
-
-def run():
-    app.run(host='0.0.0.0', port=10000)
-
-def keep_alive():
-    t = Thread(target=run)
-    t.start()
-
-# --- Telegram Bot ---
-TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+# Configura tu bot de Telegram
+TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 CHAT_ID = os.getenv('CHAT_ID')
 
-bot = Bot(token=TELEGRAM_BOT_TOKEN)
-dp = Dispatcher()
+bot = Bot(token=TOKEN)
+dp = Dispatcher(bot)
 
-async def send_notification():
-    await bot.send_message(chat_id=CHAT_ID, text="✅ Prueba de notificación enviada correctamente.")
+# Función para enviar mensaje
+async def enviar_mensaje(texto):
+    await bot.send_message(chat_id=CHAT_ID, text=texto)
 
-async def main():
-    while True:
-        await send_notification()
-        await asyncio.sleep(600)  # Cada 10 minutos (puedes cambiar el tiempo)
+# Comando /start para probar
+@dp.message_handler(commands=['start'])
+async def start_handler(message: types.Message):
+    await message.reply("✅ ZafroBot está activo y listo para enviarte notificaciones.")
 
-if __name__ == "__main__":
-    keep_alive()
-    asyncio.run(main())
+# Arranca el servidor web para mantener vivo en Render
+keep_alive()
+
+# Ejecutar el bot
+if __name__ == '__main__':
+    executor.start_polling(dp, skip_updates=True)
