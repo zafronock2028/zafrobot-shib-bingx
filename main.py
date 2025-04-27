@@ -7,16 +7,23 @@ from aiogram import Bot, Dispatcher
 from aiogram.filters import Command
 from aiogram.types import Message
 
-# Credenciales API y Telegram (ya integradas)
+# API Key de BingX
 API_KEY = "LCRNrSVWUf1crSsLEEtrdDzyIUWdNVtelJTnypigJV9HQ1AfMYhkIxiNazKDNcrGq3vgQjuKspQTjFHeA"
+
+# Secret Key de BingX
 SECRET_KEY = "Kckg5g1hCDsE9N83n8wpxDjUWk0fGI7VWKVyKRX4wzHIgmi7dXj09B4NdA2MnKTCIw7MhtLV6YLHcemS3Yjg"
-TELEGRAM_BOT_TOKEN = "7768905391:AAGn5T2LiPe4BUpmEwJb2b5ZTrG6EyoGUSU"
+
+# Token del Bot de Telegram
+TELEGRAM_BOT_TOKEN = "7768905391:AAGn5T2JiPe4RU_pmFWlhXc2Sn4OriV0CGM"
+
+# Chat ID de Telegram (no usado aún, pero preparado)
+CHAT_ID = "1130366010"
 
 # Inicialización del bot
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 dp = Dispatcher()
 
-# Función para obtener saldo en USDT
+# Función para obtener saldo en USDT en Spot
 async def get_usdt_balance():
     timestamp = int(time.time() * 1000)
     params = {
@@ -46,17 +53,17 @@ async def get_usdt_balance():
             print(f"Error en la conexión con BingX: {e}")
             return None
 
-# Manejador del comando /start
+# Comando /start
 @dp.message(Command(commands=["start"]))
 async def start_command(message: Message):
     await message.answer(
         "👋 ¡Bienvenido a ZafroBot!\n\n"
-        "Este bot te ayudará a consultar tu saldo disponible de *USDT* en tu cuenta Spot de *BingX* en tiempo real.\n\n"
-        "Envía el comando /saldo para obtener tu saldo actualizado.",
+        "Este bot te ayuda a consultar tu saldo disponible de *USDT* en tu cuenta Spot de *BingX* en tiempo real.\n\n"
+        "Envía el comando /saldo para ver tu saldo actualizado.",
         parse_mode="Markdown"
     )
 
-# Manejador del comando /saldo
+# Comando /saldo
 @dp.message(Command(commands=["saldo"]))
 async def saldo_command(message: Message):
     balance = await get_usdt_balance()
