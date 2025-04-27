@@ -1,130 +1,122 @@
 import os
-import time
 import asyncio
-import base64
-import hmac
-import hashlib
-import requests
-import json
-from datetime import datetime
-from dotenv import load_dotenv
+import logging
 from kucoin.client import Client
+from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import ParseMode
-from aiogram.utils import executor
+from aiogram.enums import ParseMode
+from aiogram.types import Message
+from aiogram.filters import CommandStart
+from aiogram import F
 
-# Cargar las variables de entorno
 load_dotenv()
 
-KUCOIN_API_KEY = os.getenv('KUCOIN_API_KEY')
-KUCOIN_API_SECRET = os.getenv('KUCOIN_API_SECRET')
-KUCOIN_API_PASSPHRASE = os.getenv('KUCOIN_API_PASSPHRASE')
-TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
+# Configurar logging
+logging.basicConfig(level=logging.INFO)
 
-client = Client(KUCOIN_API_KEY, KUCOIN_API_SECRET, KUCOIN_API_PASSPHRASE)
+# Credenciales API de KuCoin
+API_KEY = os.getenv("KUCOIN_API_KEY")
+API_SECRET = os.getenv("KUCOIN_API_SECRET")
+API_PASSPHRASE = os.getenv("KUCOIN_API_PASSPHRASE")
+
+# Bot de Telegram
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
+
 bot = Bot(token=TELEGRAM_BOT_TOKEN, parse_mode=ParseMode.HTML)
-dp = Dispatcher(bot)
+dp = Dispatcher(bot=bot)
 
-# Configuración
-pairs_to_trade = ["SEI-USDT", "ACH-USDT", "CVC-USDT"]
-profit_target = 1.5 / 100  # 1.5% Take Profit
-stop_loss_threshold = 2 / 100  # 2% Stop Loss
-investment_percentage = 0.95  # 95% del saldo disponible
+# Inicializar cliente de KuCoin
+client = Client(API_KEY, API_SECRET, API_PASSPHRASE)
 
-is_in_trade = False  # Variable para controlar operaciones activas
+# Parámetros de trading
+PAIR_LIST = ["SEI-USDT", "ACH-USDT", "CVC-USDT"]
+TAKE_PROFIT_PERCENTAGE = 0.02  # 2%
+STOP_LOSS_PERCENTAGE = 0.01    # 1%
 
-async def send_telegram_message(message):
-    await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
+# Estado de operaciones
+open_trade_info = None
 
 async def get_balance():
-    usdt_balance = client.get_currency_balance('USDT')
-    return float(usdt_balance['available'])
+    account_list = client.get_accounts()
+    usdt_balance = next((float(acc['available']) for acc in account_list if acc['currency'] == 'USDT' and acc['type'] == 'trade'), 0)
+    return usdt_balance
 
-async def get_price(pair):
-    ticker = client.get_ticker(pair)
-    return float(ticker['price'])
+async def open_trade(symbol):
+    global open_trade_info
 
-async def open_trade(pair):
-    global is_in_trade
     balance = await get_balance()
-    amount_to_spend = balance * investment_percentage
-
-    if amount_to_spend < 5:  # KuCoin mínimo de $5
-        await send_telegram_message("⚠️ No hay suficiente saldo para abrir operación.")
+    if balance < 5:
+        logging.info(f"No hay suficiente saldo USDT para abrir operación. Saldo: {balance}")
         return
 
-    price = await get_price(pair)
-    size = round(amount_to_spend / price, 6)
+    quantity = round((balance * 0.95), 2)
+    if quantity <= 0:
+        logging.info("Cantidad a comprar no válida.")
+        return
 
-    try:
-        order = client.create_market_order(pair, 'buy', size=size)
-        await send_telegram_message(f"✅ Compra ejecutada: {pair} - Cantidad: {size}")
-        is_in_trade = True
-        await monitor_trade(pair, size)
-    except Exception as e:
-        await send_telegram_message(f"⚠️ Error abriendo operación: {e}")
+    # Ejecutar compra a mercado
+    order = client.create_market_order(symbol=symbol, side="buy", size=str(quantity))
+    logging.info(f"Compra realizada en {symbol} con {quantity} USDT.")
+    await bot.send_message(CHAT_ID, f"✅ Compra realizada en <b>{symbol}</b> con <b>{quantity} USDT</b>.")
 
-async def monitor_trade(pair, size):
-    global is_in_trade
-    entry_price = await get_price(pair)
-    await send_telegram_message(f"⏳ Monitoreando operación en {pair}...")
+    open_trade_info = {
+        "symbol": symbol,
+        "buy_price": float(order['dealFunds']) / float(order['dealSize']),
+        "quantity": float(order['dealSize'])
+    }
 
+async def close_trade():
+    global open_trade_info
+
+    if not open_trade_info:
+        return
+
+    symbol = open_trade_info["symbol"]
+    quantity = open_trade_info["quantity"]
+
+    # Ejecutar venta a mercado
+    client.create_market_order(symbol=symbol, side="sell", size=str(quantity))
+    logging.info(f"Venta realizada en {symbol} de {quantity} unidades.")
+    await bot.send_message(CHAT_ID, f"✅ Venta realizada en <b>{symbol}</b> de <b>{quantity}</b> unidades.")
+
+    open_trade_info = None
+
+async def monitor_market():
     while True:
-        await asyncio.sleep(10)
-        current_price = await get_price(pair)
-        change = (current_price - entry_price) / entry_price
+        try:
+            if not open_trade_info:
+                # No hay operaciones abiertas, buscar oportunidad
+                for pair in PAIR_LIST:
+                    candles = client.get_kline_data(symbol=pair, kline_type="1min", limit=3)
+                    if len(candles) >= 2:
+                        last_close = float(candles[-1][2])
+                        prev_close = float(candles[-2][2])
+                        if last_close > prev_close * 1.003:  # Detecta mini impulso
+                            await open_trade(pair)
+                            break
+            else:
+                # Hay operación abierta, gestionar salida
+                current_price = float(client.get_ticker(open_trade_info["symbol"])["price"])
+                entry_price = open_trade_info["buy_price"]
 
-        if change >= profit_target:
-            # Tomar ganancia
-            try:
-                client.create_market_order(pair, 'sell', size=size)
-                await send_telegram_message(f"✅ Venta con GANANCIA en {pair} - {round(change*100, 2)}%")
-                is_in_trade = False
-                break
-            except Exception as e:
-                await send_telegram_message(f"⚠️ Error vendiendo: {e}")
-                break
-        elif change <= -stop_loss_threshold:
-            # Stop Loss
-            try:
-                client.create_market_order(pair, 'sell', size=size)
-                await send_telegram_message(f"❌ Venta con PÉRDIDA en {pair} - {round(change*100, 2)}%")
-                is_in_trade = False
-                break
-            except Exception as e:
-                await send_telegram_message(f"⚠️ Error vendiendo (Stop Loss): {e}")
-                break
+                if current_price >= entry_price * (1 + TAKE_PROFIT_PERCENTAGE):
+                    await close_trade()
+                elif current_price <= entry_price * (1 - STOP_LOSS_PERCENTAGE):
+                    await close_trade()
 
-async def scan_market():
-    while True:
-        if not is_in_trade:
-            best_pair = None
-            best_volatility = 0
+            await asyncio.sleep(5)
+        except Exception as e:
+            logging.error(f"Error monitoreando el mercado: {e}")
+            await asyncio.sleep(10)
 
-            for pair in pairs_to_trade:
-                try:
-                    price_now = await get_price(pair)
-                    await asyncio.sleep(1)
-                    price_later = await get_price(pair)
-                    change = abs(price_later - price_now) / price_now
+@dp.message(CommandStart())
+async def start(message: Message):
+    await message.answer("🤖 ¡ZafroBot Scalper PRO v1 listo para operar en KuCoin!")
 
-                    if change > best_volatility:
-                        best_volatility = change
-                        best_pair = pair
-                except Exception as e:
-                    await send_telegram_message(f"⚠️ Error analizando {pair}: {e}")
+async def main():
+    asyncio.create_task(monitor_market())
+    await dp.start_polling()
 
-            if best_pair:
-                await open_trade(best_pair)
-        
-        await asyncio.sleep(10)
-
-async def start_bot():
-    await send_telegram_message("🚀 ZafroBot Scalper PRO v1 Iniciado.")
-    await scan_market()
-
-if __name__ == '__main__':
-    loop = asyncio.get_event_loop()
-    loop.create_task(start_bot())
-    executor.start_polling(dp, skip_updates=True)
+if __name__ == "__main__":
+    asyncio.run(main())
