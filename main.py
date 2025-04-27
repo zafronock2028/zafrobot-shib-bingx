@@ -23,7 +23,7 @@ CHAT_ID = "1130366010"
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 dp = Dispatcher()
 
-# Función para obtener saldo en USDT en Spot
+# Función para obtener saldo en USDT
 async def get_usdt_balance():
     timestamp = int(time.time() * 1000)
     params = {
@@ -41,17 +41,18 @@ async def get_usdt_balance():
             async with session.get(url, params=params) as resp:
                 if resp.status != 200:
                     print(f"Error HTTP {resp.status}")
-                    return None
+                    return 0.0
                 data = await resp.json()
 
                 if data and "data" in data and isinstance(data["data"], list):
                     for asset_info in data["data"]:
                         if asset_info.get("asset") == "USDT":
-                            return float(asset_info.get("available", 0.0))
-                return None
+                            balance = asset_info.get("available") or asset_info.get("free") or "0"
+                            return float(balance)
+                return 0.0
         except Exception as e:
             print(f"Error en la conexión con BingX: {e}")
-            return None
+            return 0.0
 
 # Comando /start
 @dp.message(Command(commands=["start"]))
@@ -67,23 +68,20 @@ async def start_command(message: Message):
 @dp.message(Command(commands=["saldo"]))
 async def saldo_command(message: Message):
     balance = await get_usdt_balance()
-    if balance is not None:
-        balance_text = f"{balance:,.6f}"
+    balance_text = f"{balance:,.2f}"  # <--- SOLO 2 DECIMALES AQUÍ
 
-        texto = (
-            "╔══════════════════════════╗\n"
-            "║      💳 *Saldo en Spot*      ║\n"
-            "╠══════════════════════════╣\n"
-            f"║ 💵 *Moneda:* `USDT`          ║\n"
-            f"║ 📈 *Disponible:* `{balance_text}` ║\n"
-            "╠══════════════════════════╣\n"
-            "║ 🕒 _Consulta en tiempo real_ ║\n"
-            "╚══════════════════════════╝"
-        )
+    texto = (
+        "╔══════════════════════════╗\n"
+        "║      💳 *Saldo en Spot*      ║\n"
+        "╠══════════════════════════╣\n"
+        f"║ 💵 *Moneda:* `USDT`          ║\n"
+        f"║ 📈 *Disponible:* `{balance_text}` ║\n"
+        "╠══════════════════════════╣\n"
+        "║ 🕒 _Consulta en tiempo real_ ║\n"
+        "╚══════════════════════════╝"
+    )
 
-        await message.answer(texto, parse_mode="Markdown")
-    else:
-        await message.answer("❌ No se pudo obtener el saldo de USDT. Intenta más tarde.")
+    await message.answer(texto, parse_mode="Markdown")
 
 # Función principal
 async def main():
