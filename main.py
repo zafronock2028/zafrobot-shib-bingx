@@ -7,7 +7,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.filters import Command
 from aiogram.types import Message
 
-# Credenciales
+# Credenciales API y Telegram (ya integradas)
 API_KEY = "LCRNrSVWUf1crSsLEEtrdDzyIUWdNVtelJTnypigJV9HQ1AfMYhkIxiNazKDNcrGq3vgQjuKspQTjFHeA"
 SECRET_KEY = "Kckg5g1hCDsE9N83n8wpxDjUWk0fGI7VWKVyKRX4wzHIgmi7dXj09B4NdA2MnKTCIw7MhtLV6YLHcemS3Yjg"
 TELEGRAM_BOT_TOKEN = "7768905391:AAGn5T2LiPe4BUpmEwJb2b5ZTrG6EyoGUSU"
@@ -16,14 +16,13 @@ TELEGRAM_BOT_TOKEN = "7768905391:AAGn5T2LiPe4BUpmEwJb2b5ZTrG6EyoGUSU"
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 dp = Dispatcher()
 
-# Función para obtener saldo Spot
-async def get_spot_balance():
+# Función para obtener saldo en USDT
+async def get_usdt_balance():
     timestamp = int(time.time() * 1000)
     params = {
         "apiKey": API_KEY,
         "timestamp": timestamp
     }
-    # Firma HMAC-SHA256
     query_string = "&".join(f"{key}={params[key]}" for key in sorted(params))
     signature = hmac.new(SECRET_KEY.encode(), query_string.encode(), hashlib.sha256).hexdigest()
     params["sign"] = signature
@@ -36,39 +35,53 @@ async def get_spot_balance():
                 if resp.status != 200:
                     print(f"Error HTTP {resp.status}")
                     return None
-                return await resp.json()
+                data = await resp.json()
+
+                if data and "data" in data and isinstance(data["data"], list):
+                    for asset_info in data["data"]:
+                        if asset_info.get("asset") == "USDT":
+                            return float(asset_info.get("available", 0.0))
+                return None
         except Exception as e:
-            print(f"Error al conectar con BingX: {e}")
+            print(f"Error en la conexión con BingX: {e}")
             return None
+
+# Manejador del comando /start
+@dp.message(Command(commands=["start"]))
+async def start_command(message: Message):
+    await message.answer(
+        "👋 ¡Bienvenido a ZafroBot!\n\n"
+        "Este bot te ayudará a consultar tu saldo disponible de *USDT* en tu cuenta Spot de *BingX* en tiempo real.\n\n"
+        "Envía el comando /saldo para obtener tu saldo actualizado.",
+        parse_mode="Markdown"
+    )
 
 # Manejador del comando /saldo
 @dp.message(Command(commands=["saldo"]))
-async def saldo_spot(message: Message):
-    response = await get_spot_balance()
-    
-    if not response:
-        await message.answer("❌ No se pudo conectar con BingX. Inténtalo más tarde.")
-        return
+async def saldo_command(message: Message):
+    balance = await get_usdt_balance()
+    if balance is not None:
+        balance_text = f"{balance:,.6f}"
 
-    balance = 0.0
-    if "data" in response and isinstance(response["data"], list):
-        for asset_info in response["data"]:
-            if asset_info.get("asset") == "USDT":
-                balance = float(asset_info.get("available", 0))
-                break
+        texto = (
+            "╔══════════════════════════╗\n"
+            "║      💳 *Saldo en Spot*      ║\n"
+            "╠══════════════════════════╣\n"
+            f"║ 💵 *Moneda:* `USDT`          ║\n"
+            f"║ 📈 *Disponible:* `{balance_text}` ║\n"
+            "╠══════════════════════════╣\n"
+            "║ 🕒 _Consulta en tiempo real_ ║\n"
+            "╚══════════════════════════╝"
+        )
 
-    if balance > 0:
-        await message.answer(f"✅ *Saldo disponible en Spot:* `{balance:.2f} USDT`", parse_mode="Markdown")
+        await message.answer(texto, parse_mode="Markdown")
     else:
-        await message.answer("⚠️ No se encontró saldo disponible en USDT.")
+        await message.answer("❌ No se pudo obtener el saldo de USDT. Intenta más tarde.")
 
 # Función principal
 async def main():
-    try:
-        print("Bot iniciado y corriendo...")
-        await dp.start_polling(bot)
-    finally:
-        await bot.session.close()
+    print("ZafroBot iniciado... (Esperando comandos en Telegram)")
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
