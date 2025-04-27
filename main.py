@@ -22,11 +22,11 @@ def sign_params(params, secret_key):
     signature = hmac.new(secret_key.encode('utf-8'), query_string.encode('utf-8'), hashlib.sha256).hexdigest()
     return signature
 
-# Función para obtener saldo USDT libre en Spot
+# Función para obtener saldo de USDT en Spot
 async def obtener_saldo_spot():
     url = "https://open-api.bingx.com/openApi/spot/v1/account/assets"
     timestamp = int(time.time() * 1000)
-    
+
     params = {
         "apiKey": API_KEY,
         "timestamp": timestamp
@@ -50,7 +50,7 @@ async def obtener_saldo_spot():
 async def start_handler(message: types.Message):
     texto = (
         "**[[ ZafroBot Dinámico Pro ]]**\n\n"
-        "🤖 ¡Listo para ayudarte a consultar tu saldo real de **USDT** en tu cuenta **SPOT** de BingX!\n\n"
+        "🤖 ¡Estoy listo para ayudarte a consultar tu saldo real de **USDT** en tu cuenta **SPOT** de BingX!\n\n"
         "Usa el comando /saldo para verlo en **tiempo real**."
     )
     await message.answer(texto, parse_mode="Markdown")
@@ -62,15 +62,15 @@ async def saldo_handler(message: types.Message):
     if saldo is not None:
         respuesta = (
             "**[[ ZafroBot Dinámico Pro ]]**\n\n"
-            f"💰 Saldo disponible en SPOT:\n\n"
-            f"**{saldo:.2f} USDT**\n\n"
+            "✅ **Saldo disponible en SPOT:**\n\n"
+            f"💵 **{saldo:.2f} USDT**\n\n"
             "_(Actualizado en tiempo real.)_"
         )
     else:
         respuesta = (
             "**[[ ZafroBot Dinámico Pro ]]**\n\n"
-            "⚠️ No fue posible obtener tu saldo en este momento.\n"
-            "_Por favor intenta de nuevo en unos minutos._"
+            "⚠️ No fue posible obtener tu saldo.\n\n"
+            "_Por favor intenta nuevamente en unos minutos._"
         )
     await message.answer(respuesta, parse_mode="Markdown")
 
