@@ -3,11 +3,9 @@ import requests
 import time
 import hmac
 import hashlib
-import base64
-import json
-from aiogram import Bot, Dispatcher, F, types
+from aiogram import Bot, Dispatcher, types
 from aiogram.enums import ParseMode
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, Command
 from aiogram.types import Message
 from flask import Flask
 import threading
@@ -68,15 +66,23 @@ def obtener_saldo_spot(api_key, secret_key):
     except Exception as e:
         return f"Error obteniendo saldo: {str(e)}"
 
-# Comando /start mejorado
+# Comando /start (bienvenida)
 @dp.message(CommandStart())
 async def start_handler(message: Message):
-    await message.answer("✅ Bot activo y recibiendo mensajes correctamente.")
-    
-    start_time = time.time()  # Tiempo antes de consultar
+    await message.answer(
+        "**Bienvenido a ZafroBot Notifier**\n\n"
+        "✅ Bot activo y listo.\n"
+        "👉 Usa /saldo para ver tu saldo Spot actualizado.",
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+# Nuevo comando /saldo
+@dp.message(Command("saldo"))
+async def saldo_handler(message: Message):
+    start_time = time.time()
     saldo = obtener_saldo_spot(api_key, secret_key)
-    end_time = time.time()    # Tiempo después de consultar
-    elapsed_time = round(end_time - start_time, 2)  # Tiempo transcurrido
+    end_time = time.time()
+    elapsed_time = round(end_time - start_time, 2)
     
     if isinstance(saldo, float):
         await message.answer(
