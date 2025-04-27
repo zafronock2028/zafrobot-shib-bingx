@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: zafrobot-notifier
+    env: python
+    plan: free
+    buildCommand: ""
+    startCommand: "python main.py"
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        value: tu_token_aqui
+      - key: API_KEY
+        value: tu_api_key_aqui
+      - key: SECRET_KEY
+        value: tu_secret_key_aqui
+      - key: CHAT_ID
+        value: tu_chat_id_aqui
+    autoDeploy: true
+    healthCheckPath: /
