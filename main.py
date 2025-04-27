@@ -1,107 +1,160 @@
+import asyncio
 import os
 import time
 import hmac
 import hashlib
-import base64
-import json
 import aiohttp
-import asyncio
+from aiogram import Bot, Dispatcher
+from aiogram.types import Message
+from aiogram.filters import Command
 from kucoin.client import Client
-from aiogram import Bot, Dispatcher, types
-from aiogram.types import BotCommand
-from aiogram.enums import ParseMode
 
-# Variables de entorno
+# Cargar variables de entorno
 API_KEY = os.getenv("API_KEY")
-API_SECRET = os.getenv("SECRET_KEY")
-API_PASSPHRASE = os.getenv("API_PASSPHRASE")
+SECRET_KEY = os.getenv("SECRET_KEY")
+PASSPHRASE = os.getenv("PASSPHRASE")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
-# Parámetros de Trading
-PAIRS = ["SEI-USDT", "ACH-USDT", "CVC-USDT"]
-TRADE_PERCENTAGE = 0.95  # Usa el 95% del balance disponible
-TAKE_PROFIT_PERCENT = 1.8  # 1.8% de ganancia
-STOP_LOSS_PERCENT = 1.2    # 1.2% de pérdida máxima
+# Inicializar KuCoin y Telegram Bot
+client = Client(API_KEY, SECRET_KEY, PASSPHRASE)
+bot = Bot(token=TELEGRAM_BOT_TOKEN)
+dp = Dispatcher()
 
-# Inicializar bot de Telegram
-bot = Bot(token=TELEGRAM_BOT_TOKEN, default=BotCommand)
-dp = Dispatcher(bot=bot)
+# Variables internas
+operaciones_realizadas = 0
+ganancia_total_dia = 0.0
+saldo_acumulado = 0.0
+operacion_en_curso = False
+primer_operacion_del_dia = False
 
-# Cliente de KuCoin
-client = Client(API_KEY, API_SECRET, API_PASSPHRASE)
+# Pares configurados
+pares = ["SEI-USDT", "ACH-USDT", "CVC-USDT"]
 
-async def enviar_mensaje(mensaje):
-    await bot.send_message(chat_id=CHAT_ID, text=mensaje, parse_mode=ParseMode.HTML)
-
-async def obtener_balance_usdt():
-    accounts = await client.get_accounts()
-    for account in accounts:
-        if account['currency'] == 'USDT' and account['type'] == 'trade':
-            return float(account['available'])
-    return 0.0
-
-async def analizar_par(par):
-    ticker = await client.get_ticker(par)
-    last_price = float(ticker['price'])
-    return last_price
-
-async def abrir_operacion(par):
-    balance = await obtener_balance_usdt()
-    if balance < 5:
-        await enviar_mensaje("❌ Saldo insuficiente para operar.")
-        return
-
-    precio_compra = await analizar_par(par)
-    cantidad = (balance * TRADE_PERCENTAGE) / precio_compra
-
-    try:
-        order = await client.create_market_order(par, 'buy', size=round(cantidad, 4))
-        await enviar_mensaje(f"✅ Compra realizada en {par} a precio de mercado: {precio_compra:.4f} USDT")
-
-        await monitorear_operacion(par, precio_compra)
-
-    except Exception as e:
-        await enviar_mensaje(f"⚠️ Error al abrir operación: {str(e)}")
-
-async def monitorear_operacion(par, precio_entrada):
-    take_profit = precio_entrada * (1 + TAKE_PROFIT_PERCENT / 100)
-    stop_loss = precio_entrada * (1 - STOP_LOSS_PERCENT / 100)
-
+async def analizar_mercado():
+    global operaciones_realizadas, ganancia_total_dia, saldo_acumulado, operacion_en_curso, primer_operacion_del_dia
     while True:
-        precio_actual = await analizar_par(par)
-        
-        if precio_actual >= take_profit:
-            balance = await obtener_balance_par(par)
-            if balance > 0:
-                await client.create_market_order(par, 'sell', size=balance)
-                await enviar_mensaje(f"✅ ¡Take Profit alcanzado! Vendido {par} a {precio_actual:.4f} USDT")
-            break
+        if not operacion_en_curso:
+            oportunidad_detectada = False
+            for par in pares:
+                try:
+                    ticker = client.get_ticker(symbol=par)
+                    precio_actual = float(ticker['price'])
+                    # Simulador simple: detectar bajadas mínimas (puedes mejorar esto luego)
+                    if precio_actual:
+                        oportunidad_detectada = True
+                        cantidad_usdt = 5  # Puedes cambiar esto o hacerlo dinámico basado en saldo
+                        cantidad_compra = cantidad_usdt / precio_actual
+                        orden_compra = client.create_market_order(
+                            symbol=par,
+                            side="buy",
+                            size=round(cantidad_compra, 6)
+                        )
 
-        if precio_actual <= stop_loss:
-            balance = await obtener_balance_par(par)
-            if balance > 0:
-                await client.create_market_order(par, 'sell', size=balance)
-                await enviar_mensaje(f"⚠️ Stop Loss activado. Vendido {par} a {precio_actual:.4f} USDT")
-            break
+                        operacion_en_curso = True
+
+                        if not primer_operacion_del_dia:
+                            primer_operacion_del_dia = True
+                            await bot.send_message(
+                                CHAT_ID,
+                                "📢 *¡Comenzando operaciones del día!*\n🌟 *Un nuevo día, nuevas oportunidades para crecer.*",
+                                parse_mode="Markdown"
+                            )
+
+                        await bot.send_message(
+                            CHAT_ID,
+                            f"✅ *COMPRA ejecutada*\nPar: {par}\nCantidad: {round(cantidad_compra, 6)}\nPrecio: {precio_actual}",
+                            parse_mode="Markdown"
+                        )
+
+                        # Esperar a que suba 2% para vender
+                        precio_objetivo = precio_actual * 1.02
+                        precio_stoploss = precio_actual * 0.98
+
+                        while operacion_en_curso:
+                            await asyncio.sleep(5)
+                            ticker_nuevo = client.get_ticker(symbol=par)
+                            precio_nuevo = float(ticker_nuevo['price'])
+
+                            if precio_nuevo >= precio_objetivo:
+                                client.create_market_order(
+                                    symbol=par,
+                                    side="sell",
+                                    size=round(cantidad_compra, 6)
+                                )
+                                ganancia = cantidad_usdt * 0.02
+                                ganancia_total_dia += ganancia
+                                saldo_acumulado += ganancia
+                                operaciones_realizadas += 1
+                                await bot.send_message(
+                                    CHAT_ID,
+                                    f"🎯 *Take Profit alcanzado en {par}*\nGanancia: +2.0%\n💼 Nuevo saldo aproximado: +{saldo_acumulado:.2f} USDT\n📈 *Mini resumen:* {operaciones_realizadas} operación(es) completadas hoy.",
+                                    parse_mode="Markdown"
+                                )
+                                operacion_en_curso = False
+                                break
+
+                            elif precio_nuevo <= precio_stoploss:
+                                client.create_market_order(
+                                    symbol=par,
+                                    side="sell",
+                                    size=round(cantidad_compra, 6)
+                                )
+                                operaciones_realizadas += 1
+                                await bot.send_message(
+                                    CHAT_ID,
+                                    f"⚠️ *Stop Loss activado en {par}*\nPérdida controlada.\n💼 Nuevo saldo aproximado: +{saldo_acumulado:.2f} USDT",
+                                    parse_mode="Markdown"
+                                )
+                                operacion_en_curso = False
+                                break
+                except Exception as e:
+                    await bot.send_message(CHAT_ID, f"Error analizando {par}: {str(e)}")
+
+            if not oportunidad_detectada:
+                await bot.send_message(CHAT_ID, "⏳ *Analizando mercado... sin oportunidades claras aún.*", parse_mode="Markdown")
 
         await asyncio.sleep(10)
 
-async def obtener_balance_par(par):
-    symbol = par.split("-")[0]
-    accounts = await client.get_accounts()
-    for account in accounts:
-        if account['currency'] == symbol and account['type'] == 'trade':
-            return float(account['available'])
-    return 0.0
+async def resumen_diario():
+    global operaciones_realizadas, ganancia_total_dia, saldo_acumulado, primer_operacion_del_dia
+    while True:
+        ahora = time.localtime()
+        if ahora.tm_hour == 23 and ahora.tm_min == 59:
+            mensaje = f"📊 *Resumen diario*\n"
+            mensaje += f"🛒 Operaciones realizadas: {operaciones_realizadas}\n"
+            mensaje += f"💰 Ganancia total del día: {ganancia_total_dia:.2f} USDT\n"
+            mensaje += f"🔥 Rentabilidad diaria: +{(ganancia_total_dia/5)*100:.2f}%\n"
+            mensaje += f"💎 Ganancia acumulada total: {saldo_acumulado:.2f} USDT\n"
+            mensaje += f"⚡ Actividad del bot: {'Activo' if operaciones_realizadas > 0 else 'Esperando oportunidades'}\n"
+            mensaje += f"📅 Fecha: {time.strftime('%d/%m/%Y - %H:%M', ahora)}\n\n"
+            if ganancia_total_dia > 0:
+                mensaje += "🎉 *¡Gran día de ganancias! Sigamos construyendo activos con Zafronock.*\n\n"
+            mensaje += "🚀 *¿Quieres seguir creando más activos como este junto a Zafronock?*\n"
+            mensaje += "📈 *Únete al canal oficial:* [GanandoConZafronock](https://t.me/GanandoConZafronock)\n"
+            mensaje += "#GanandoConZafronock"
+            await bot.send_message(CHAT_ID, mensaje, parse_mode="Markdown")
+
+            # Resetear el día
+            operaciones_realizadas = 0
+            ganancia_total_dia = 0.0
+            primer_operacion_del_dia = False
+
+        await asyncio.sleep(60)
+
+@dp.message(Command(commands=["start"]))
+async def start(message: Message):
+    await message.answer("🚀 *ZafroBot Scalper PRO v1 iniciado exitosamente.*\n🔎 *Analizando mercado en busca de oportunidades...*", parse_mode="Markdown")
 
 async def main():
-    await enviar_mensaje("🚀 ZafroBot Scalper PRO v1 ha iniciado correctamente.")
-
-    while True:
-        for par in PAIRS:
-            await abrir_operacion(par)
-            await asyncio.sleep(5)
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+        asyncio.create_task(analizar_mercado())
+        asyncio.create_task(resumen_diario())
+        await dp.start_polling(bot)
+    finally:
+        await bot.session.close()
 
 if __name__ == "__main__":
     asyncio.run(main())
