@@ -1,77 +1,80 @@
 import logging
-import asyncio
-import aiohttp
 import hmac
 import hashlib
 import time
-import json
-from aiogram import Bot, Dispatcher
-from aiogram.types import Message
-from aiogram.filters import Command
+import aiohttp
+import asyncio
+from aiogram import Bot, Dispatcher, types
 from aiogram.enums import ParseMode
 
-# Tus datos ya integrados
-API_KEY = "LCRNrSVWUf1crSsLE5+xdPxYtUWdNVte"
-SECRET_KEY = "Kckg5g1hCDsE9N83p8wpxDiUWk0fcfTZY"
-TELEGRAM_BOT_TOKEN = "7768905391:AAGn5T2LiPe4RUpmEwJb"
+# TUS DATOS FIJOS INTEGRADOS
+API_KEY = "LCRNrSVWUf1crSsLEEtrdDzyIUWdNVtelJTnypigJV9HQ1AfMYhkIxiNazKDNcrGq3vgQjuKspQTjFHeA"
+SECRET_KEY = "Kckg5g1hCDsE9N83n8wpxDjUWk0fGI7VWKVyKRX4wzHIgmi7dXj09B4NdA2MnKTCIw7MhtLV6YLHcemS3Yjg"
+TELEGRAM_BOT_TOKEN = "8100886306:AAFRDnn32wMKXhZGfKThiFFGPhL0p6KFjW"
 CHAT_ID = "1130366010"
 
 # Inicializar bot
 bot = Bot(token=TELEGRAM_BOT_TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher()
 
-# Formato bonito del saldo
+# Formato bonito de la tarjeta de saldo
 def formatear_tarjeta(saldo):
     return (
-        "━━━━━━━━━━━━━━━━━━\n"
-        "📋 Saldo en Spot\n"
-        "━━━━━━━━━━━━━━━━━━\n"
-        f"💵 Moneda: USDT\n"
-        f"📈 Disponible: {saldo:.2f}\n"
-        "━━━━━━━━━━━━━━━━━━\n"
-        "🕓 Consulta en tiempo real\n"
-        "━━━━━━━━━━━━━━━━━━"
+        "━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "📋 <b>Saldo en Spot</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "💵 <b>Moneda:</b> USDT\n"
+        f"📈 <b>Disponible:</b> {saldo:.2f} USDT\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "⏰ <i>Consulta en tiempo real</i>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━"
     )
 
-# Obtener saldo de BingX
+# Obtener saldo de USDT en Spot
 async def obtener_saldo_usdt():
     timestamp = str(int(time.time() * 1000))
     query_string = f"timestamp={timestamp}"
     signature = hmac.new(SECRET_KEY.encode(), query_string.encode(), hashlib.sha256).hexdigest()
 
     headers = {
-        'X-BX-APIKEY': API_KEY
+        "X-BX-APIKEY": API_KEY
     }
 
-    url = f"https://open-api.bingx.com/openApi/spot/v1/account/balance?{query_string}&signature={signature}"
+    url = f"https://open-api.bingx.com/openApi/user/spot/assets?{query_string}&signature={signature}"
 
     async with aiohttp.ClientSession() as session:
         async with session.get(url, headers=headers) as response:
             if response.status == 200:
                 data = await response.json()
-                balances = data.get('data', {}).get('balances', [])
+                balances = data.get("data", [])
                 for balance in balances:
-                    if balance['asset'] == 'USDT':
-                        return float(balance['free'])
-                return 0.0
-            else:
-                return 0.0
+                    if balance.get("asset") == "USDT":
+                        return float(balance.get("free", 0))
+            return 0.0
 
 # Comando /start
 @dp.message(Command("start"))
-async def start_handler(message: Message):
-    await message.answer("👋 ¡Bienvenido a ZafroBot!\nEnvía /saldo para consultar tu saldo disponible en USDT.")
+async def start_command(message: types.Message):
+    if str(message.from_user.id) != CHAT_ID:
+        return
+    await message.answer(
+        "👋 ¡Bienvenido a <b>ZafroBot</b>!\n\nEnvía el comando <b>/saldo</b> para ver tu saldo actualizado.",
+        parse_mode=ParseMode.HTML
+    )
 
 # Comando /saldo
 @dp.message(Command("saldo"))
-async def saldo_handler(message: Message):
+async def saldo_command(message: types.Message):
+    if str(message.from_user.id) != CHAT_ID:
+        return
     saldo = await obtener_saldo_usdt()
-    respuesta = formatear_tarjeta(saldo)
-    await message.answer(respuesta)
+    tarjeta = formatear_tarjeta(saldo)
+    await message.answer(tarjeta, parse_mode=ParseMode.HTML)
 
-# Main para arrancar
+# Función principal
 async def main():
     logging.basicConfig(level=logging.INFO)
+    await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
