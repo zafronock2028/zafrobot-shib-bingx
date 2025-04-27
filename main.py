@@ -2,16 +2,15 @@ import time
 import hmac
 import hashlib
 import requests
-from aiogram import Bot, Dispatcher, executor, types
+import asyncio
+from aiogram import Bot, Dispatcher, types
 
 # ====== TUS CREDENCIALES API (ya integradas) ======
 API_KEY = "RA2cfzSaJKWxDrVEXitoiLZK1dpfEQLaCe8TIdG77Nl2GJEiImL7eXRRWIJDdjwYpakLIa37EQIpI6jpQ"
 API_SECRET = "VlwOFCk2hsJxth98TQLZoHf7HLDxDCNHuGmIKyhHgh9UoturNTon3rkiLwtbsr1zxqZcOvVyWNCILFDzVVLg"
 
-# ====== TU TOKEN DE TELEGRAM (ya lo tienes configurado en Render) ======
+# ====== TU TOKEN DE TELEGRAM ======
 BOT_TOKEN = "TU_TELEGRAM_BOT_TOKEN"
-bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher(bot)
 
 # ====== FUNCIÓN PARA OBTENER EL SALDO USDT EN SPOT ======
 def get_spot_usdt_balance():
@@ -40,8 +39,12 @@ def get_spot_usdt_balance():
     except Exception as e:
         return None
 
-# ====== COMANDO /start ======
-@dp.message_handler(commands=['start'])
+# ====== CONFIGURAR BOT Y DISPATCHER ======
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher()
+
+# ====== HANDLERS ======
+@dp.message(commands=['start'])
 async def start(message: types.Message):
     text = (
         "**[[ ZafroBot Dinámico Pro ]]**\n\n"
@@ -50,8 +53,7 @@ async def start(message: types.Message):
     )
     await message.answer(text, parse_mode="Markdown")
 
-# ====== COMANDO /saldo ======
-@dp.message_handler(commands=['saldo'])
+@dp.message(commands=['saldo'])
 async def saldo(message: types.Message):
     retry_count = 0
     balance = None
@@ -76,6 +78,9 @@ async def saldo(message: types.Message):
 
     await message.answer(text, parse_mode="Markdown")
 
-# ====== INICIAR BOT ======
+# ====== INICIAR EL BOT ======
+async def main():
+    await dp.start_polling(bot)
+
 if __name__ == "__main__":
-    executor.start_polling(dp, skip_updates=True)
+    asyncio.run(main())
