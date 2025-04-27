@@ -1,78 +1,79 @@
+import os
 import logging
 import asyncio
-import os
-import requests
 from aiogram import Bot, Dispatcher, types
-from flask import Flask
+from aiogram.filters import CommandStart, Command
+from aiohttp import web
+import requests
 
-# Configurar logging
+# Configura el logging
 logging.basicConfig(level=logging.INFO)
 
 # Variables de entorno
-API_KEY = os.getenv('API_KEY')
-SECRET_KEY = os.getenv('SECRET_KEY')
-TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-CHAT_ID = os.getenv('CHAT_ID')
+API_KEY = os.getenv("API_KEY")
+SECRET_KEY = os.getenv("SECRET_KEY")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
 
-# Inicializar bot de Telegram
+# Inicializar bot y dispatcher
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
-dp = Dispatcher(bot)
+dp = Dispatcher()
 
-# Función para consultar saldo USDT real en Spot
-def obtener_saldo_spot():
+# Función para obtener saldo en tiempo real
+async def get_spot_balance():
     url = "https://open-api.bingx.com/openApi/spot/v1/account/balance"
     headers = {
-        "X-BX-APIKEY": API_KEY,
+        "X-BX-APIKEY": API_KEY
     }
     try:
         response = requests.get(url, headers=headers)
-        response.raise_for_status()
-        balances = response.json().get('data', [])
-        
-        # Buscar saldo USDT
-        for asset in balances:
-            if asset['asset'] == 'USDT':
-                balance = float(asset['free'])
-                return balance
-        return 0.0
+        if response.status_code == 200:
+            data = response.json()
+            if data["code"] == 0:
+                balances = data["data"]["balances"]
+                usdt_balance = next((float(asset["free"]) for asset in balances if asset["asset"] == "USDT"), 0)
+                return usdt_balance
     except Exception as e:
-        logging.error(f"Error obteniendo saldo: {e}")
-        return None
+        logging.error(f"Error obteniendo el balance: {e}")
+    return None
 
 # Comando /start
-@dp.message_handler(commands=['start'])
-async def start_handler(message: types.Message):
-    await message.answer("✅ Bot activo y listo.\n👉 Usa /saldo para ver tu saldo Spot actualizado.")
+@dp.message(CommandStart())
+async def start(message: types.Message):
+    await message.answer(
+        "✅ Bot activo y listo.\n👉 Usa /saldo para ver tu saldo Spot actualizado."
+    )
 
 # Comando /saldo
-@dp.message_handler(commands=['saldo'])
-async def saldo_handler(message: types.Message):
+@dp.message(Command(commands=["saldo"]))
+async def saldo(message: types.Message):
     await message.answer("⏳ Consultando saldo en tiempo real...")
-    saldo = obtener_saldo_spot()
-    if saldo is not None:
-        texto = f"""
-💰 *Saldo USDT disponible en Spot:*
-`{saldo:.2f}` USDT
-
-🕒 _Actualizado en tiempo real_
-        """
-        await message.answer(texto, parse_mode='Markdown')
+    balance = await get_spot_balance()
+    if balance is not None:
+        await message.answer(
+            f"🏦 *ZafroBot Wallet*\n\n"
+            f"💰 *Saldo USDT disponible en Spot:* `{balance:.2f}` *USDT*\n\n"
+            f"🕓 _Actualizado en tiempo real_",
+            parse_mode="Markdown"
+        )
     else:
         await message.answer("⚠️ No se pudo obtener el saldo. Intenta nuevamente en unos segundos.")
 
-# Crear app Flask para mantener vivo en Render
-app = Flask(__name__)
+# Web server para que Render no cierre el bot
+async def handle(request):
+    return web.Response(text="Bot running!")
 
-@app.route('/')
-def home():
-    return "ZafroBot Notifier está corriendo."
+async def main():
+    # Web server
+    app = web.Application()
+    app.router.add_get("/", handle)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", 10000)
+    await site.start()
 
-# Función para iniciar el bot
-async def iniciar_bot():
-    await dp.start_polling()
+    # Iniciar bot
+    await dp.start_polling(bot)
 
-# Ejecutar
 if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
-    loop.create_task(iniciar_bot())
-    app.run(host="0.0.0.0", port=10000)
+    asyncio.run(main())
