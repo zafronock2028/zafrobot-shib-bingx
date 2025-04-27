@@ -1,78 +1,66 @@
 import os
 import aiohttp
-from aiogram import Bot, Dispatcher, types
-from aiogram.filters import Command
-from aiogram import F
-from aiogram.types import Message
-from aiogram import Router
 import asyncio
+from aiogram import Bot, Dispatcher, types
+from aiogram.filters import CommandStart, Command
+from dotenv import load_dotenv
+import time
 import hmac
 import hashlib
-import time
 
-# Obtener variables de entorno correctas
+# Cargar variables de entorno
+load_dotenv()
+
 API_KEY = os.getenv("API_KEY")
 SECRET_KEY = os.getenv("SECRET_KEY")
-CHAT_ID = os.getenv("CHAT_ID")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
 
-# Iniciar bot y dispatcher
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 dp = Dispatcher()
 
-router = Router()
-dp.include_router(router)
+async def obtener_saldo():
+    url = "https://open-api.bingx.com/openApi/wallet/supported-coin-list"
 
-# Función para firmar la solicitud a BingX
-def generate_signature(secret_key, timestamp):
-    message = f"timestamp={timestamp}"
-    signature = hmac.new(secret_key.encode('utf-8'), message.encode('utf-8'), hashlib.sha256).hexdigest()
-    return signature
-
-# Función para obtener saldo en SPOT (USDT)
-async def obtener_saldo_spot():
-    url = "https://open-api.bingx.com/openApi/user/assets"
     timestamp = str(int(time.time() * 1000))
-    headers = {
-        "X-BX-APIKEY": API_KEY
-    }
-    params = {
-        "timestamp": timestamp,
-        "signature": generate_signature(SECRET_KEY, timestamp)
-    }
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=headers, params=params) as response:
-            if response.status == 200:
-                data = await response.json()
-                if data["code"] == 0:
-                    for asset in data["data"]:
-                        if asset["asset"] == "USDT":
-                            return float(asset["balance"])
-                else:
-                    print("Error en respuesta de API:", data)
-            else:
-                print("Error de conexión:", response.status)
-    return None
+    params = f"timestamp={timestamp}"
+    signature = hmac.new(SECRET_KEY.encode(), params.encode(), hashlib.sha256).hexdigest()
 
-# Comando /start
-@router.message(Command("start"))
-async def start(message: Message):
-    bienvenida = (
+    headers = {
+        "X-BX-APIKEY": API_KEY,
+        "Content-Type": "application/json",
+    }
+
+    full_url = f"{url}?{params}&signature={signature}"
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(full_url, headers=headers) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                for coin in data.get("data", []):
+                    if coin["asset"] == "USDT":
+                        spot_balance = float(coin.get("spotAvailableBalance", 0))
+                        return spot_balance
+                return 0.0
+            else:
+                return None
+
+@dp.message(CommandStart())
+async def start_handler(message: types.Message):
+    texto = (
         "**[[ ZafroBot Dinámico Pro ]]**\n\n"
         "🤖 Estoy listo para ayudarte a consultar tu saldo real de USDT en tu cuenta SPOT de BingX.\n\n"
-        "Usa el comando /saldo para verlo en **tiempo real**."
+        "Usa el comando /saldo para verlo en tiempo real."
     )
-    await message.answer(bienvenida, parse_mode="Markdown")
+    await message.answer(texto, parse_mode="Markdown")
 
-# Comando /saldo
-@router.message(Command("saldo"))
-async def saldo(message: Message):
-    saldo = await obtener_saldo_spot()
+@dp.message(Command("saldo"))
+async def saldo_handler(message: types.Message):
+    saldo = await obtener_saldo()
     if saldo is not None:
         respuesta = (
             "**[[ ZafroBot Dinámico Pro ]]**\n\n"
-            f"💰 Tu saldo actual en SPOT es: **{saldo} USDT**\n\n"
-            "_(Datos en tiempo real)._"
+            f"💰 Saldo actual disponible en SPOT: **${saldo:.2f} USDT**"
         )
     else:
         respuesta = (
@@ -82,7 +70,6 @@ async def saldo(message: Message):
         )
     await message.answer(respuesta, parse_mode="Markdown")
 
-# Iniciar el bot
 async def main():
     await dp.start_polling(bot)
 
