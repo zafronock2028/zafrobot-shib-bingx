@@ -1,7 +1,5 @@
 aiogram==3.1.1
 flask
 requests
-binance
 aiohttp
 websockets
-cryptography
