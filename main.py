@@ -1,56 +1,54 @@
-import os
-import requests
 import asyncio
 from aiogram import Bot, Dispatcher, types
-from aiogram.filters import Command
-from aiogram import F
+import aiohttp
+from aiohttp import ClientSession
 
-# Cargar las variables de entorno
-API_KEY = os.getenv("API_KEY")
-SECRET_KEY = os.getenv("SECRET_KEY")
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
+# Tus datos ya integrados:
+API_KEY = "RA2cfzSaJKWxDrVEXitoiLZK1dpfEQLaCe8TIdG77Nl2GJEiImL7eXRRWIJDdjwYpakLIa37EQIpI6jpQ"
+SECRET_KEY = "VlwOFCk2hsJxth98TQLZoHf7HLDxDCNHuGmIKyhHgh9UoturNTon3rkiLwtbsr1zxqZcOvVyWNCILFDzVVLg"
+TELEGRAM_TOKEN = "8100886306:AAFRDnn32wMKXhZGfkThifFFGPhL0p6KFjw"
+CHAT_ID = "1130366010"
 
-# Inicializar el bot y el dispatcher
-bot = Bot(token=BOT_TOKEN)
+# Inicializar bot y dispatcher
+bot = Bot(token=TELEGRAM_TOKEN)
 dp = Dispatcher()
 
-# Función para consultar el saldo de USDT en BingX
 async def consultar_saldo():
-    url = "https://open-api.bingx.com/openApi/spot/v1/account/balance"
+    url = "https://open-api.bingx.com/openApi/wallet/sumAssets"
     headers = {
-        "X-BX-APIKEY": API_KEY,
+        "X-BX-APIKEY": API_KEY
     }
-    params = {
-        "timestamp": str(int(asyncio.get_event_loop().time() * 1000)),
-    }
-    response = requests.get(url, headers=headers, params=params)
-    data = response.json()
+    async with ClientSession() as session:
+        try:
+            async with session.get(url, headers=headers) as response:
+                result = await response.json()
+                if result.get("code") == 0:
+                    balances = result.get("data", [])
+                    for asset in balances:
+                        if asset.get("asset") == "USDT":
+                            saldo = asset.get("balance", "0")
+                            return saldo
+                    return "0"
+                else:
+                    return None
+        except Exception as e:
+            print(f"Error consultando saldo: {e}")
+            return None
 
-    if data.get("code") == 0:
-        balances = data.get("data", {}).get("balances", [])
-        for balance in balances:
-            if balance.get("asset") == "USDT":
-                free_balance = balance.get("free")
-                return free_balance
-    return None
+@dp.message(commands=["start"])
+async def start(message: types.Message):
+    await message.answer("🤖 ¡Hola! Soy ZafroBot Dinámico Pro.\n\nEstoy listo para ayudarte a consultar tu saldo de USDT en BingX.\n\nUsa el comando /saldo para ver tu saldo actual.")
 
-# Comando /start
-@dp.message(Command("start"))
-async def start_command(message: types.Message):
-    await message.answer("🤖 ¡Hola! Soy ZafroBot Dinámico Pro. Estoy listo para ayudarte a consultar tu saldo de USDT en BingX. Usa el comando /saldo para ver tu saldo actual.")
-
-# Comando /saldo
-@dp.message(Command("saldo"))
-async def saldo_command(message: types.Message):
+@dp.message(commands=["saldo"])
+async def saldo(message: types.Message):
     saldo = await consultar_saldo()
     if saldo is not None:
-        await message.answer(f"💵 Tu saldo disponible en USDT es: {saldo}")
+        await message.answer(f"💵 Tu saldo actual de USDT en BingX es: **{saldo} USDT**")
     else:
         await message.answer("⚠️ No se pudo obtener el saldo. Revisa tus credenciales o intenta más tarde.")
 
-# Función principal para iniciar el bot
 async def main():
+    await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
