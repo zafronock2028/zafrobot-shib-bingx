@@ -9,8 +9,6 @@ from aiogram import Bot, Dispatcher, F, types
 from aiogram.enums import ParseMode
 from aiogram.filters import CommandStart
 from aiogram.types import Message
-from aiogram import Router
-from aiogram import Dispatcher, Bot
 from flask import Flask
 import threading
 import asyncio
@@ -89,10 +87,17 @@ async def start_handler(message: Message):
     else:
         await message.answer(f"⚠️ {saldo}")
 
-# Función principal
-async def main():
-    await dp.start_polling(bot)
+# Función principal segura
+async def start_bot():
+    while True:
+        try:
+            await dp.start_polling(bot)
+        except Exception as e:
+            logging.error(f"Error en polling: {e}")
+            logging.info("Reintentando en 5 segundos...")
+            await asyncio.sleep(5)
 
+# Lanzar Flask y Bot
 if __name__ == "__main__":
     keep_alive()
-    asyncio.run(main())
+    asyncio.run(start_bot())
