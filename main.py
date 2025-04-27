@@ -1,15 +1,15 @@
 import asyncio
 from aiogram import Bot, Dispatcher, types
+from aiogram.filters import Command
 import aiohttp
 from aiohttp import ClientSession
 
-# Tus datos ya integrados:
+# Tus datos integrados:
 API_KEY = "RA2cfzSaJKWxDrVEXitoiLZK1dpfEQLaCe8TIdG77Nl2GJEiImL7eXRRWIJDdjwYpakLIa37EQIpI6jpQ"
 SECRET_KEY = "VlwOFCk2hsJxth98TQLZoHf7HLDxDCNHuGmIKyhHgh9UoturNTon3rkiLwtbsr1zxqZcOvVyWNCILFDzVVLg"
 TELEGRAM_TOKEN = "8100886306:AAFRDnn32wMKXhZGfkThifFFGPhL0p6KFjw"
 CHAT_ID = "1130366010"
 
-# Inicializar bot y dispatcher
 bot = Bot(token=TELEGRAM_TOKEN)
 dp = Dispatcher()
 
@@ -35,11 +35,13 @@ async def consultar_saldo():
             print(f"Error consultando saldo: {e}")
             return None
 
-@dp.message(commands=["start"])
+@dp.message(Command("start"))
 async def start(message: types.Message):
-    await message.answer("🤖 ¡Hola! Soy ZafroBot Dinámico Pro.\n\nEstoy listo para ayudarte a consultar tu saldo de USDT en BingX.\n\nUsa el comando /saldo para ver tu saldo actual.")
+    await message.answer(
+        "🤖 ¡Hola! Soy ZafroBot Dinámico Pro.\n\nEstoy listo para ayudarte a consultar tu saldo de USDT en BingX.\n\nUsa el comando /saldo para ver tu saldo actual."
+    )
 
-@dp.message(commands=["saldo"])
+@dp.message(Command("saldo"))
 async def saldo(message: types.Message):
     saldo = await consultar_saldo()
     if saldo is not None:
