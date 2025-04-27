@@ -1,6 +1,7 @@
 import logging
-from aiogram import Bot, Dispatcher, types
-from aiogram.types import Message
+from aiogram import Bot, Dispatcher, F
+from aiogram.types import Message, Update
+from aiogram.enums import ParseMode
 from aiohttp import web
 import aiohttp
 import asyncio
@@ -10,7 +11,7 @@ import hashlib
 import time
 import json
 
-# Variables de entorno o directas
+# API y claves
 API_KEY = "LCRNrSVWUf1crSsLEEtrdDzyIUWdNVtelJTnypigJV9HQ1AfMYhkIxiNazKDNcrGq3vgQjuKspQTjFHeA"
 SECRET_KEY = "Kckg5g1hCDsE9N83n8wpxDjUWk0fGI7VWKVyKRX4wzHIgmi7dXj09B4NdA2MnKTCIw7MhtLV6YLHcemS3Yjg"
 TELEGRAM_BOT_TOKEN = "7768905391:AAGn5T2JiPe4RU_pmFWlhXc2Sn4OriV0CGM"
@@ -19,7 +20,7 @@ WEBHOOK_URL = "https://zafrobot-shib-bingx.onrender.com/webhook"
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 dp = Dispatcher()
 
-# Formateo de saldo
+# Formatear saldo bonito
 def formatear_tarjeta(saldo):
     return (
         "┌───────────────────────────────┐\n"
@@ -32,6 +33,7 @@ def formatear_tarjeta(saldo):
         "└───────────────────────────────┘"
     )
 
+# Consulta de saldo
 async def obtener_saldo_usdt():
     timestamp = str(int(time.time() * 1000))
     query_string = f"timestamp={timestamp}"
@@ -53,16 +55,17 @@ async def obtener_saldo_usdt():
                         return float(balance.get("balance", 0))
             return 0
 
-@dp.message(commands=["start"])
+# Handlers
+@dp.message(F.text == "/start")
 async def start(message: Message):
     bienvenida = (
         "👋 *¡Bienvenido a ZafroBot!*\n\n"
         "Este bot te ayuda a consultar tu saldo disponible de *USDT* en tu cuenta Spot de *BingX* en tiempo real.\n\n"
         "Envía el comando /saldo para ver tu saldo actualizado."
     )
-    await message.answer(bienvenida, parse_mode="Markdown")
+    await message.answer(bienvenida, parse_mode=ParseMode.MARKDOWN)
 
-@dp.message(commands=["saldo"])
+@dp.message(F.text == "/saldo")
 async def saldo(message: Message):
     saldo_actual = await obtener_saldo_usdt()
     respuesta = formatear_tarjeta(saldo_actual)
@@ -74,13 +77,14 @@ async def on_startup(app):
 async def on_shutdown(app):
     await bot.delete_webhook()
 
-# Configuración del servidor web
+# Webhook
 async def handle_webhook(request):
     body = await request.read()
-    update = types.Update(**json.loads(body))
+    update = Update.model_validate_json(body)
     await dp.feed_update(bot, update)
     return web.Response()
 
+# Configurar server
 app = web.Application()
 app.router.add_post("/webhook", handle_webhook)
 app.on_startup.append(on_startup)
