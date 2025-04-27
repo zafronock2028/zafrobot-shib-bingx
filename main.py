@@ -1,76 +1,77 @@
-import os
-import asyncio
 import logging
-import aiohttp
+import asyncio
 import requests
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from flask import Flask
+import threading
 
-# Configurar logging
+# --- Configuración ---
+API_KEY = 'LCRNrSVWUf1crSsLEEtrdDzyIUWdNVtelJTnypigJV9HQ1AfMYhkIxiNazKDNcrGq3vgQjuKspQTjFHeA'
+SECRET_KEY = 'Kckg5g1hCDsE9N83n8wpxDjUWk0fGI7VWKVyKRX4wzHIgmi7dXj09B4NdA2MnKTCIw7MhtLV6YLHcemS3Yjg'
+TELEGRAM_BOT_TOKEN = '7768905391:AAGn5T2JiPe4RU_pmFWlhXc2Sn4OriV0CGM'
+CHAT_ID = '295613'  # tu chat_id
+BASE_URL = 'https://open-api.bingx.com'
+
+# --- Inicializar bot ---
 logging.basicConfig(level=logging.INFO)
-
-# Obtener variables de entorno
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-API_KEY = os.getenv("API_KEY")
-SECRET_KEY = os.getenv("SECRET_KEY")
-CHAT_ID = os.getenv("CHAT_ID")
-
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 dp = Dispatcher()
 
-# Web Server para mantener vivo en Render
-app = Flask(__name__)
+# --- Función para obtener el saldo de USDT en Spot ---
+async def obtener_saldo():
+    try:
+        headers = {
+            'X-BX-APIKEY': API_KEY
+        }
+        response = requests.get(f"{BASE_URL}/openApi/spot/v1/account/assets", headers=headers, timeout=10)
+        if response.status_code == 200:
+            datos = response.json()
+            balances = datos.get('data', [])
+            for balance in balances:
+                if balance.get('asset') == 'USDT':
+                    free_balance = float(balance.get('free', 0))
+                    return round(free_balance, 2)
+            return 0.0
+        else:
+            return None
+    except Exception as e:
+        logging.error(f"Error al consultar saldo: {e}")
+        return None
 
-@app.route('/')
-def home():
-    return 'ZafroBot está corriendo!'
-
-# Función para consultar saldo en tiempo real
-async def get_spot_balance():
-    url = "https://open-api.bingx.com/openApi/spot/v1/account/balance"
-    headers = {
-        "X-BX-APIKEY": API_KEY
-    }
-    params = {
-        "timestamp": int(asyncio.get_event_loop().time() * 1000)
-    }
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=headers, params=params) as response:
-            data = await response.json()
-            if data.get("code") == 0:
-                balances = data["data"]["balances"]
-                for balance in balances:
-                    if balance["asset"] == "USDT":
-                        return float(balance["free"])
-    return None
-
-# Comando /start
-@dp.message(Command("start"))
-async def start(message: types.Message):
+# --- Comando /start ---
+@dp.message(Command('start'))
+async def start_handler(message: types.Message):
     await message.answer("✅ Bot activo y listo.\n👉 Usa /saldo para ver tu saldo Spot actualizado.")
 
-# Comando /saldo
-@dp.message(Command("saldo"))
-async def saldo(message: types.Message):
+# --- Comando /saldo ---
+@dp.message(Command('saldo'))
+async def saldo_handler(message: types.Message):
     await message.answer("⏳ Consultando saldo en tiempo real...")
-    balance = await get_spot_balance()
-    if balance is not None:
+    saldo = await obtener_saldo()
+    if saldo is not None:
         await message.answer(
-            f"📒 *ZafroBot Wallet*\n\n"
-            f"💰 *Saldo USDT disponible en Spot:*\n`{balance:.2f}` USDT\n\n"
-            f"🕰️ *Actualizado en tiempo real*",
-            parse_mode="Markdown"
+            f"🪙 *Saldo USDT disponible en Spot:*\n\n`{saldo}` *USDT*\n\n🕒 _Actualizado en tiempo real_",
+            parse_mode='Markdown'
         )
     else:
         await message.answer("⚠️ No se pudo obtener el saldo. Intenta nuevamente en unos segundos.")
 
-# Función principal
+# --- Servidor Flask para mantener vivo Render ---
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bot corriendo."
+
+def iniciar_flask():
+    app.run(host='0.0.0.0', port=10000)
+
+# --- Main ---
 async def main():
-    await bot.delete_webhook(drop_pending_updates=True)
+    flask_thread = threading.Thread(target=iniciar_flask)
+    flask_thread.start()
     await dp.start_polling(bot)
 
-if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
-    loop.create_task(main())
-    app.run(host="0.0.0.0", port=10000)
+if __name__ == '__main__':
+    asyncio.run(main())
