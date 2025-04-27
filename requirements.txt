@@ -1,5 +1,4 @@
 python-kucoin
 python-dotenv
 requests
-aiohttp
-aiogram
+aiogram==3.4.1
