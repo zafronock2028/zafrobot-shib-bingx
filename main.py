@@ -1,113 +1,130 @@
+import os
 import asyncio
-import aiohttp
+import time
+import base64
 import hmac
 import hashlib
-import time
 import json
-import os
+import aiohttp
 from aiogram import Bot, Dispatcher, types
-from aiogram.filters import Command
+from aiogram.types import ParseMode
+from dotenv import load_dotenv
 
-# Variables de entorno
+load_dotenv()
+
 API_KEY = os.getenv('API_KEY')
-SECRET_KEY = os.getenv('SECRET_KEY')
-CHAT_ID = os.getenv('CHAT_ID')
+API_SECRET = os.getenv('SECRET_KEY')
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+CHAT_ID = os.getenv('CHAT_ID')
 
-# Pares que se van a escanear
-PAIRS = ["SEIUSDT", "OPUSDT", "SUIUSDT"]
-
-# Configuraciones de trading
-TAKE_PROFIT_PERCENT = 2.5
-STOP_LOSS_PERCENT = 2.5
-TRADE_PERCENTAGE = 0.8  # 80% del saldo disponible
-
-# Crear bot de Telegram
-bot = Bot(token=TELEGRAM_BOT_TOKEN)
+bot = Bot(token=TELEGRAM_BOT_TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher()
 
-# Estado del bot
-operation_open = False
+trading_pairs = ["SEI-USDT", "CVC-USDT", "CUC-USDT"]
+TRADE_AMOUNT_PERCENTAGE = 0.80  # 80% del saldo disponible
+TAKE_PROFIT_PERCENTAGE = 0.015  # 1.5%
+STOP_LOSS_PERCENTAGE = 0.02     # 2%
+TRADE_INTERVAL = 5  # segundos entre cada revisión
 
-async def get_balance():
-    url = "https://api.kucoin.com/api/v1/accounts"
-    timestamp = str(int(time.time() * 1000))
-    method = 'GET'
-    endpoint = "/api/v1/accounts"
-    payload = ''
-    str_to_sign = str(timestamp) + method + endpoint + payload
-    signature = hmac.new(SECRET_KEY.encode('utf-8'), str_to_sign.encode('utf-8'), hashlib.sha256).digest()
-    signature_b64 = base64.b64encode(signature).decode()
+base_url = "https://api.kucoin.com"
+
+async def kucoin_request(method, endpoint, params=None):
+    now = int(time.time() * 1000)
+    str_to_sign = str(now) + method + endpoint
+    if params and method == 'GET':
+        query_string = '&'.join([f"{k}={v}" for k, v in params.items()])
+        str_to_sign += '?' + query_string
+    elif params:
+        str_to_sign += json.dumps(params)
+
+    signature = base64.b64encode(
+        hmac.new(API_SECRET.encode('utf-8'), str_to_sign.encode('utf-8'), hashlib.sha256).digest()
+    ).decode()
 
     headers = {
         "KC-API-KEY": API_KEY,
-        "KC-API-SIGN": signature_b64,
-        "KC-API-TIMESTAMP": timestamp,
-        "KC-API-PASSPHRASE": "",  # No usamos passphrase en esta versión
+        "KC-API-SIGN": signature,
+        "KC-API-TIMESTAMP": str(now),
+        "KC-API-PASSPHRASE": os.getenv('PASSPHRASE'),
         "KC-API-KEY-VERSION": "2",
         "Content-Type": "application/json"
     }
 
     async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=headers) as response:
-            data = await response.json()
-            if data.get("code") == "200000":
-                for balance in data["data"]:
-                    if balance["currency"] == "USDT" and balance["type"] == "trade":
-                        return float(balance["available"])
+        url = base_url + endpoint
+        if method == 'GET':
+            async with session.get(url, headers=headers, params=params) as response:
+                return await response.json()
+        elif method == 'POST':
+            async with session.post(url, headers=headers, json=params) as response:
+                return await response.json()
+
+async def get_balance():
+    data = await kucoin_request('GET', '/api/v1/accounts', params={"type": "trade"})
+    for asset in data.get('data', []):
+        if asset['currency'] == 'USDT':
+            return float(asset['available'])
     return 0.0
 
-async def send_telegram_message(text):
-    await bot.send_message(chat_id=CHAT_ID, text=text)
-
-async def scan_market():
-    global operation_open
-    while True:
-        if not operation_open:
-            for pair in PAIRS:
-                if await check_entry(pair):
-                    await open_trade(pair)
-                    break
-        await asyncio.sleep(60)
-
-async def check_entry(pair):
-    # Aquí pondrías tu análisis real
-    return True  # Temporal, para prueba
-
-async def open_trade(pair):
-    global operation_open
+async def open_trade(symbol):
     balance = await get_balance()
-    if balance <= 0:
-        await send_telegram_message("❌ No hay saldo suficiente para operar.")
+    if balance <= 1:
         return
 
-    usdt_amount = balance * TRADE_PERCENTAGE
-    await send_telegram_message(f"🟢 Abriendo operación en {pair} con {usdt_amount:.2f} USDT.")
+    trade_amount = balance * TRADE_AMOUNT_PERCENTAGE
+    price_data = await kucoin_request('GET', '/api/v1/market/orderbook/level1', params={"symbol": symbol})
+    price = float(price_data['data']['price'])
+    quantity = round(trade_amount / price, 4)
 
-    # Simular compra
-    operation_open = True
+    # Crear orden de compra a mercado
+    order = {
+        "clientOid": str(int(time.time() * 1000)),
+        "side": "buy",
+        "symbol": symbol,
+        "type": "market",
+        "size": quantity
+    }
+    await kucoin_request('POST', '/api/v1/orders', params=order)
 
-    # Simular ganancia o pérdida después de un tiempo
-    await asyncio.sleep(60)  # 1 minuto simulado de operación
+    await bot.send_message(CHAT_ID, f"✅ Compra realizada en {symbol}\nMonto: {trade_amount:.2f} USDT")
 
-    # Simular cierre
-    await close_trade(pair, usdt_amount)
+    await manage_trade(symbol, price, quantity)
 
-async def close_trade(pair, usdt_amount):
-    global operation_open
-    # Simulación: suponemos ganancia
-    gain = usdt_amount * (TAKE_PROFIT_PERCENT / 100)
-    await send_telegram_message(f"✅ Cerrada operación en {pair} con ganancia de {gain:.2f} USDT.")
-    operation_open = False
+async def manage_trade(symbol, buy_price, quantity):
+    while True:
+        price_data = await kucoin_request('GET', '/api/v1/market/orderbook/level1', params={"symbol": symbol})
+        current_price = float(price_data['data']['price'])
 
-@dp.message(Command(commands=["start"]))
-async def start_bot(message: types.Message):
-    await message.answer("🤖 ZafroBot Scalper PRO v2 iniciado correctamente. ¡Listo para trabajar!")
+        if current_price >= buy_price * (1 + TAKE_PROFIT_PERCENTAGE):
+            await sell_trade(symbol, quantity)
+            await bot.send_message(CHAT_ID, f"✅ Venta con GANANCIA en {symbol}\nPrecio: {current_price:.4f}")
+            break
+        elif current_price <= buy_price * (1 - STOP_LOSS_PERCENTAGE):
+            await sell_trade(symbol, quantity)
+            await bot.send_message(CHAT_ID, f"⚠️ Venta con PÉRDIDA controlada en {symbol}\nPrecio: {current_price:.4f}")
+            break
 
-async def main():
-    await bot.delete_webhook(drop_pending_updates=True)
-    asyncio.create_task(scan_market())
-    await dp.start_polling(bot)
+        await asyncio.sleep(5)
+
+async def sell_trade(symbol, quantity):
+    order = {
+        "clientOid": str(int(time.time() * 1000)),
+        "side": "sell",
+        "symbol": symbol,
+        "type": "market",
+        "size": quantity
+    }
+    await kucoin_request('POST', '/api/v1/orders', params=order)
+
+async def bot_main():
+    await bot.send_message(CHAT_ID, "🚀 ZafroBot Scalper PRO v1 iniciado y listo para operar en KuCoin.")
+
+    while True:
+        await asyncio.sleep(TRADE_INTERVAL)
+        await open_trade(select_best_pair())
+
+def select_best_pair():
+    return trading_pairs[int(time.time()) % len(trading_pairs)]
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(bot_main())
