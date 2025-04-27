@@ -1,82 +1,112 @@
-import os
-import time
-import hmac
-import hashlib
 import asyncio
 import aiohttp
+import hmac
+import hashlib
+import time
+import json
+import os
 from aiogram import Bot, Dispatcher, types
-from aiogram.filters import Command, CommandStart
-from aiogram.enums import ParseMode
-from dotenv import load_dotenv
+from aiogram.filters import Command
 
-# Cargar variables de entorno
-load_dotenv()
+# Variables de entorno
+API_KEY = os.getenv('API_KEY')
+SECRET_KEY = os.getenv('SECRET_KEY')
+CHAT_ID = os.getenv('CHAT_ID')
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 
-API_KEY = os.getenv("API_KEY")
-SECRET_KEY = os.getenv("SECRET_KEY")
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+# Pares que se van a escanear
+PAIRS = ["SEIUSDT", "OPUSDT", "SUIUSDT"]
 
-bot = Bot(token=TELEGRAM_BOT_TOKEN, parse_mode=ParseMode.HTML)
+# Configuraciones de trading
+TAKE_PROFIT_PERCENT = 2.5
+STOP_LOSS_PERCENT = 2.5
+TRADE_PERCENTAGE = 0.8  # 80% del saldo disponible
+
+# Crear bot de Telegram
+bot = Bot(token=TELEGRAM_BOT_TOKEN)
 dp = Dispatcher()
 
-# Función para firmar la consulta
-def create_signature(params, secret_key):
-    query_string = '&'.join(f"{k}={params[k]}" for k in sorted(params))
-    signature = hmac.new(secret_key.encode('utf-8'), query_string.encode('utf-8'), hashlib.sha256).hexdigest()
-    return signature
+# Estado del bot
+operation_open = False
 
-# Función para obtener el saldo disponible de USDT
 async def get_balance():
-    url = "https://open-api.bingx.com/openApi/user/assets"
-    timestamp = int(time.time() * 1000)
-    params = {
-        "timestamp": timestamp
-    }
-    signature = create_signature(params, SECRET_KEY)
+    url = "https://api.kucoin.com/api/v1/accounts"
+    timestamp = str(int(time.time() * 1000))
+    method = 'GET'
+    endpoint = "/api/v1/accounts"
+    payload = ''
+    str_to_sign = str(timestamp) + method + endpoint + payload
+    signature = hmac.new(SECRET_KEY.encode('utf-8'), str_to_sign.encode('utf-8'), hashlib.sha256).digest()
+    signature_b64 = base64.b64encode(signature).decode()
 
     headers = {
-        "X-BX-APIKEY": API_KEY
+        "KC-API-KEY": API_KEY,
+        "KC-API-SIGN": signature_b64,
+        "KC-API-TIMESTAMP": timestamp,
+        "KC-API-PASSPHRASE": "",  # No usamos passphrase en esta versión
+        "KC-API-KEY-VERSION": "2",
+        "Content-Type": "application/json"
     }
 
     async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=headers, params={**params, "signature": signature}) as response:
-            if response.status == 200:
-                result = await response.json()
-                if result["code"] == 0:
-                    for asset in result["data"]["assets"]:
-                        if asset["asset"] == "USDT":
-                            return float(asset.get("availableBalance", 0))
-            return None
+        async with session.get(url, headers=headers) as response:
+            data = await response.json()
+            if data.get("code") == "200000":
+                for balance in data["data"]:
+                    if balance["currency"] == "USDT" and balance["type"] == "trade":
+                        return float(balance["available"])
+    return 0.0
 
-@dp.message(CommandStart())
-async def start_handler(message: types.Message):
-    await message.answer(
-        "<b>[ ZafroBot Dinámico Pro ]</b>\n\n"
-        "🤖 ¡Listo para ayudarte a consultar tu saldo real de USDT en tu cuenta SPOT de BingX!\n\n"
-        "Escribe /saldo cuando quieras saberlo en tiempo real."
-    )
+async def send_telegram_message(text):
+    await bot.send_message(chat_id=CHAT_ID, text=text)
 
-@dp.message(Command("saldo"))
-async def saldo_handler(message: types.Message):
-    # Mensaje de carga
-    loading_msg = await message.answer("⏳ Consultando tu saldo, un momento...")
+async def scan_market():
+    global operation_open
+    while True:
+        if not operation_open:
+            for pair in PAIRS:
+                if await check_entry(pair):
+                    await open_trade(pair)
+                    break
+        await asyncio.sleep(60)
 
+async def check_entry(pair):
+    # Aquí pondrías tu análisis real
+    return True  # Temporal, para prueba
+
+async def open_trade(pair):
+    global operation_open
     balance = await get_balance()
-    if balance is not None:
-        await loading_msg.edit_text(
-            f"<b>[ ZafroBot Dinámico Pro ]</b>\n\n"
-            f"💵 <b>Saldo actual disponible en Spot:</b>\n"
-            f"➤ <b>${balance:.2f} USDT</b>\n\n"
-            "_(Actualizado en tiempo real.)_ ✅"
-        )
-    else:
-        await loading_msg.edit_text(
-            "<b>[ ZafroBot Dinámico Pro ]</b>\n\n"
-            "⚠️ No fue posible obtener tu saldo.\n"
-            "<i>Por favor intenta nuevamente en unos minutos.</i>"
-        )
+    if balance <= 0:
+        await send_telegram_message("❌ No hay saldo suficiente para operar.")
+        return
+
+    usdt_amount = balance * TRADE_PERCENTAGE
+    await send_telegram_message(f"🟢 Abriendo operación en {pair} con {usdt_amount:.2f} USDT.")
+
+    # Simular compra
+    operation_open = True
+
+    # Simular ganancia o pérdida después de un tiempo
+    await asyncio.sleep(60)  # 1 minuto simulado de operación
+
+    # Simular cierre
+    await close_trade(pair, usdt_amount)
+
+async def close_trade(pair, usdt_amount):
+    global operation_open
+    # Simulación: suponemos ganancia
+    gain = usdt_amount * (TAKE_PROFIT_PERCENT / 100)
+    await send_telegram_message(f"✅ Cerrada operación en {pair} con ganancia de {gain:.2f} USDT.")
+    operation_open = False
+
+@dp.message(Command(commands=["start"]))
+async def start_bot(message: types.Message):
+    await message.answer("🤖 ZafroBot Scalper PRO v2 iniciado correctamente. ¡Listo para trabajar!")
 
 async def main():
+    await bot.delete_webhook(drop_pending_updates=True)
+    asyncio.create_task(scan_market())
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
