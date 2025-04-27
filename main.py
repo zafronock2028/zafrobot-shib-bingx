@@ -1,160 +1,125 @@
-import asyncio
 import os
-import time
 import hmac
-import hashlib
+import base64
+import time
+import json
 import aiohttp
-from aiogram import Bot, Dispatcher
-from aiogram.types import Message
-from aiogram.filters import Command
-from kucoin.client import Client
+from hashlib import sha256
+from aiogram import Bot, Dispatcher, types
+from aiogram.enums.parse_mode import ParseMode
+import asyncio
 
-# Cargar variables de entorno
-API_KEY = os.getenv("API_KEY")
-SECRET_KEY = os.getenv("SECRET_KEY")
-PASSPHRASE = os.getenv("PASSPHRASE")
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+# Variables de entorno
+API_KEY = os.getenv('API_KEY')
+API_SECRET = os.getenv('SECRET_KEY')
+API_PASSPHRASE = os.getenv('API_PASSPHRASE')
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+CHAT_ID = os.getenv('CHAT_ID')
 
-# Inicializar KuCoin y Telegram Bot
-client = Client(API_KEY, SECRET_KEY, PASSPHRASE)
-bot = Bot(token=TELEGRAM_BOT_TOKEN)
+BASE_URL = "https://api.kucoin.com"
+
+# Inicializar el bot de Telegram
+bot = Bot(token=TELEGRAM_BOT_TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher()
 
-# Variables internas
-operaciones_realizadas = 0
-ganancia_total_dia = 0.0
-saldo_acumulado = 0.0
-operacion_en_curso = False
-primer_operacion_del_dia = False
+# Función para enviar mensaje a Telegram
+async def send_telegram_message(message):
+    await bot.send_message(chat_id=CHAT_ID, text=message)
 
-# Pares configurados
-pares = ["SEI-USDT", "ACH-USDT", "CVC-USDT"]
+# Función para hacer peticiones a KuCoin
+async def kucoin_request(method, endpoint, payload=None):
+    now = int(time.time() * 1000)
+    payload_json = json.dumps(payload) if payload else ''
+    str_to_sign = f"{now}{method}{endpoint}{payload_json}"
+    
+    signature = base64.b64encode(
+        hmac.new(API_SECRET.encode('utf-8'), str_to_sign.encode('utf-8'), sha256).digest()
+    ).decode()
+    
+    passphrase = base64.b64encode(
+        hmac.new(API_SECRET.encode('utf-8'), API_PASSPHRASE.encode('utf-8'), sha256).digest()
+    ).decode()
 
-async def analizar_mercado():
-    global operaciones_realizadas, ganancia_total_dia, saldo_acumulado, operacion_en_curso, primer_operacion_del_dia
-    while True:
-        if not operacion_en_curso:
-            oportunidad_detectada = False
-            for par in pares:
-                try:
-                    ticker = client.get_ticker(symbol=par)
-                    precio_actual = float(ticker['price'])
-                    # Simulador simple: detectar bajadas mínimas (puedes mejorar esto luego)
-                    if precio_actual:
-                        oportunidad_detectada = True
-                        cantidad_usdt = 5  # Puedes cambiar esto o hacerlo dinámico basado en saldo
-                        cantidad_compra = cantidad_usdt / precio_actual
-                        orden_compra = client.create_market_order(
-                            symbol=par,
-                            side="buy",
-                            size=round(cantidad_compra, 6)
-                        )
+    headers = {
+        "KC-API-KEY": API_KEY,
+        "KC-API-SIGN": signature,
+        "KC-API-TIMESTAMP": str(now),
+        "KC-API-PASSPHRASE": passphrase,
+        "KC-API-KEY-VERSION": "2",
+        "Content-Type": "application/json"
+    }
+    
+    async with aiohttp.ClientSession() as session:
+        url = BASE_URL + endpoint
+        if method == "GET":
+            async with session.get(url, headers=headers) as response:
+                return await response.json()
+        elif method == "POST":
+            async with session.post(url, headers=headers, data=payload_json) as response:
+                return await response.json()
 
-                        operacion_en_curso = True
-
-                        if not primer_operacion_del_dia:
-                            primer_operacion_del_dia = True
-                            await bot.send_message(
-                                CHAT_ID,
-                                "📢 *¡Comenzando operaciones del día!*\n🌟 *Un nuevo día, nuevas oportunidades para crecer.*",
-                                parse_mode="Markdown"
-                            )
-
-                        await bot.send_message(
-                            CHAT_ID,
-                            f"✅ *COMPRA ejecutada*\nPar: {par}\nCantidad: {round(cantidad_compra, 6)}\nPrecio: {precio_actual}",
-                            parse_mode="Markdown"
-                        )
-
-                        # Esperar a que suba 2% para vender
-                        precio_objetivo = precio_actual * 1.02
-                        precio_stoploss = precio_actual * 0.98
-
-                        while operacion_en_curso:
-                            await asyncio.sleep(5)
-                            ticker_nuevo = client.get_ticker(symbol=par)
-                            precio_nuevo = float(ticker_nuevo['price'])
-
-                            if precio_nuevo >= precio_objetivo:
-                                client.create_market_order(
-                                    symbol=par,
-                                    side="sell",
-                                    size=round(cantidad_compra, 6)
-                                )
-                                ganancia = cantidad_usdt * 0.02
-                                ganancia_total_dia += ganancia
-                                saldo_acumulado += ganancia
-                                operaciones_realizadas += 1
-                                await bot.send_message(
-                                    CHAT_ID,
-                                    f"🎯 *Take Profit alcanzado en {par}*\nGanancia: +2.0%\n💼 Nuevo saldo aproximado: +{saldo_acumulado:.2f} USDT\n📈 *Mini resumen:* {operaciones_realizadas} operación(es) completadas hoy.",
-                                    parse_mode="Markdown"
-                                )
-                                operacion_en_curso = False
-                                break
-
-                            elif precio_nuevo <= precio_stoploss:
-                                client.create_market_order(
-                                    symbol=par,
-                                    side="sell",
-                                    size=round(cantidad_compra, 6)
-                                )
-                                operaciones_realizadas += 1
-                                await bot.send_message(
-                                    CHAT_ID,
-                                    f"⚠️ *Stop Loss activado en {par}*\nPérdida controlada.\n💼 Nuevo saldo aproximado: +{saldo_acumulado:.2f} USDT",
-                                    parse_mode="Markdown"
-                                )
-                                operacion_en_curso = False
-                                break
-                except Exception as e:
-                    await bot.send_message(CHAT_ID, f"Error analizando {par}: {str(e)}")
-
-            if not oportunidad_detectada:
-                await bot.send_message(CHAT_ID, "⏳ *Analizando mercado... sin oportunidades claras aún.*", parse_mode="Markdown")
-
-        await asyncio.sleep(10)
-
-async def resumen_diario():
-    global operaciones_realizadas, ganancia_total_dia, saldo_acumulado, primer_operacion_del_dia
-    while True:
-        ahora = time.localtime()
-        if ahora.tm_hour == 23 and ahora.tm_min == 59:
-            mensaje = f"📊 *Resumen diario*\n"
-            mensaje += f"🛒 Operaciones realizadas: {operaciones_realizadas}\n"
-            mensaje += f"💰 Ganancia total del día: {ganancia_total_dia:.2f} USDT\n"
-            mensaje += f"🔥 Rentabilidad diaria: +{(ganancia_total_dia/5)*100:.2f}%\n"
-            mensaje += f"💎 Ganancia acumulada total: {saldo_acumulado:.2f} USDT\n"
-            mensaje += f"⚡ Actividad del bot: {'Activo' if operaciones_realizadas > 0 else 'Esperando oportunidades'}\n"
-            mensaje += f"📅 Fecha: {time.strftime('%d/%m/%Y - %H:%M', ahora)}\n\n"
-            if ganancia_total_dia > 0:
-                mensaje += "🎉 *¡Gran día de ganancias! Sigamos construyendo activos con Zafronock.*\n\n"
-            mensaje += "🚀 *¿Quieres seguir creando más activos como este junto a Zafronock?*\n"
-            mensaje += "📈 *Únete al canal oficial:* [GanandoConZafronock](https://t.me/GanandoConZafronock)\n"
-            mensaje += "#GanandoConZafronock"
-            await bot.send_message(CHAT_ID, mensaje, parse_mode="Markdown")
-
-            # Resetear el día
-            operaciones_realizadas = 0
-            ganancia_total_dia = 0.0
-            primer_operacion_del_dia = False
-
-        await asyncio.sleep(60)
-
-@dp.message(Command(commands=["start"]))
-async def start(message: Message):
-    await message.answer("🚀 *ZafroBot Scalper PRO v1 iniciado exitosamente.*\n🔎 *Analizando mercado en busca de oportunidades...*", parse_mode="Markdown")
-
-async def main():
+# Función para consultar el saldo disponible en USDT
+async def get_balance():
     try:
-        await bot.delete_webhook(drop_pending_updates=True)
-        asyncio.create_task(analizar_mercado())
-        asyncio.create_task(resumen_diario())
-        await dp.start_polling(bot)
-    finally:
-        await bot.session.close()
+        response = await kucoin_request("GET", "/api/v1/accounts")
+        for account in response.get('data', []):
+            if account['currency'] == 'USDT' and account['type'] == 'trade':
+                return float(account['available'])
+    except Exception as e:
+        await send_telegram_message(f"Error obteniendo balance: {e}")
+    return 0.0
+
+# Función para abrir una operación de compra
+async def open_trade(symbol):
+    balance = await get_balance()
+    if balance <= 0:
+        await send_telegram_message("No hay saldo disponible para operar.")
+        return
+    
+    # Usamos 95% del saldo para cada operación
+    usdt_to_spend = balance * 0.95
+
+    order = {
+        "clientOid": str(int(time.time() * 1000)),
+        "side": "buy",
+        "symbol": symbol,
+        "type": "market",
+        "funds": str(usdt_to_spend)
+    }
+    try:
+        response = await kucoin_request("POST", "/api/v1/orders", order)
+        if response.get('code') == "200000":
+            await send_telegram_message(f"¡Compra realizada en {symbol}!")
+        else:
+            await send_telegram_message(f"Error al comprar {symbol}: {response}")
+    except Exception as e:
+        await send_telegram_message(f"Error abriendo operación: {e}")
+
+# Función principal para escanear y operar
+async def main_loop():
+    symbols = ["SEI-USDT", "ACH-USDT", "CVC-USDT"]
+
+    while True:
+        for symbol in symbols:
+            try:
+                ticker = await kucoin_request("GET", f"/api/v1/market/orderbook/level1?symbol={symbol}")
+                price = float(ticker['data']['price'])
+                
+                # Aquí puedes agregar tus condiciones de scalping para comprar/vender
+                if price > 0:  # De momento solo validamos precio válido
+                    await open_trade(symbol)
+                    
+                    # Luego de abrir una operación, esperamos 30 segundos antes de volver a escanear
+                    await asyncio.sleep(30)
+            except Exception as e:
+                await send_telegram_message(f"Error analizando {symbol}: {e}")
+
+        await asyncio.sleep(10)  # Tiempo entre cada ciclo de escaneo
+
+# Ejecución
+async def start_bot():
+    await send_telegram_message("✅ ZafroBot Scalper PRO v1 iniciado correctamente.")
+    await main_loop()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(start_bot())
