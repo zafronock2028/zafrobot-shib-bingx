@@ -7,12 +7,12 @@ services:
     startCommand: "python main.py"
     envVars:
       - key: TELEGRAM_BOT_TOKEN
-        value: tu_token_aqui
+        value: 7768905391:AAGn5T2JiPe4RU_pmFWlhXc2Sn4OriV0CGM
       - key: API_KEY
-        value: tu_api_key_aqui
+        value: LCRNrSVWUf1crSsLEEtrdDzyIUWdNVtelJTnypigJV9HQ1AfMYhkIxiNazKDNcrGq3vgQjuKspQTjFHeA
       - key: SECRET_KEY
-        value: tu_secret_key_aqui
+        value: Kckg5g1hCDsE9N83n8wpxDjUWk0fGI7VWKVyKRX4wzHIgmi7dXj09B4NdA2MnKTCIw7MhtLV6YLHcemS3Yjg
       - key: CHAT_ID
-        value: tu_chat_id_aqui
+        value: 295520
     autoDeploy: true
     healthCheckPath: /
