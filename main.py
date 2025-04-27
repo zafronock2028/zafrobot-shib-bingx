@@ -1,6 +1,7 @@
 import requests
 import asyncio
-from aiogram import Bot, Dispatcher, types
+from aiogram import Bot, Dispatcher, F
+from aiogram.types import Message
 from flask import Flask
 from threading import Thread
 
@@ -36,9 +37,9 @@ def obtener_saldo_spot():
         print(f"Error consultando saldo: {e}")
         return 0.0
 
-# Comando /start
-@dp.message(commands=["start"])
-async def start_handler(message: types.Message):
+# Comando /start usando Aiogram 3
+@dp.message(F.text == "/start")
+async def start_handler(message: Message):
     saldo = obtener_saldo_spot()
     respuesta = (
         "✅ *Bot activo y recibiendo mensajes correctamente.*\n"
