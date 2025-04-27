@@ -1,120 +1,130 @@
-import asyncio
+import os
 import time
+import asyncio
+import base64
 import hmac
 import hashlib
-import base64
-import json
 import requests
-from aiogram import Bot, Dispatcher, types
+import json
+from datetime import datetime
 from dotenv import load_dotenv
-import os
+from kucoin.client import Client
+from aiogram import Bot, Dispatcher, types
+from aiogram.types import ParseMode
+from aiogram.utils import executor
 
+# Cargar las variables de entorno
 load_dotenv()
 
+KUCOIN_API_KEY = os.getenv('KUCOIN_API_KEY')
+KUCOIN_API_SECRET = os.getenv('KUCOIN_API_SECRET')
+KUCOIN_API_PASSPHRASE = os.getenv('KUCOIN_API_PASSPHRASE')
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
+
+client = Client(KUCOIN_API_KEY, KUCOIN_API_SECRET, KUCOIN_API_PASSPHRASE)
+bot = Bot(token=TELEGRAM_BOT_TOKEN, parse_mode=ParseMode.HTML)
+dp = Dispatcher(bot)
+
 # Configuración
-API_KEY = os.getenv("KUCOIN_API_KEY")
-API_SECRET = os.getenv("KUCOIN_API_SECRET")
-API_PASSPHRASE = os.getenv("KUCOIN_API_PASSPHRASE")
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
+pairs_to_trade = ["SEI-USDT", "ACH-USDT", "CVC-USDT"]
+profit_target = 1.5 / 100  # 1.5% Take Profit
+stop_loss_threshold = 2 / 100  # 2% Stop Loss
+investment_percentage = 0.95  # 95% del saldo disponible
 
-PAIRS = ["SEI-USDT", "ACH-USDT", "CVC-USDT"]
-TAKE_PROFIT_PERCENT = 0.015  # 1.5%
-STOP_LOSS_PERCENT = 0.01     # 1%
+is_in_trade = False  # Variable para controlar operaciones activas
 
-BASE_URL = "https://api.kucoin.com"
-
-bot = Bot(token=TELEGRAM_BOT_TOKEN, parse_mode="HTML")
-dp = Dispatcher()
-
-async def send_telegram(message):
-    await bot.send_message(chat_id=CHAT_ID, text=message, parse_mode="HTML")
-
-def get_headers(endpoint, method="GET", body=""):
-    now = int(time.time() * 1000)
-    str_to_sign = str(now) + method + endpoint + body
-    signature = base64.b64encode(
-        hmac.new(API_SECRET.encode('utf-8'), str_to_sign.encode('utf-8'), hashlib.sha256).digest()
-    ).decode()
-
-    passphrase = base64.b64encode(
-        hmac.new(API_SECRET.encode('utf-8'), API_PASSPHRASE.encode('utf-8'), hashlib.sha256).digest()
-    ).decode()
-
-    return {
-        "KC-API-KEY": API_KEY,
-        "KC-API-SIGN": signature,
-        "KC-API-TIMESTAMP": str(now),
-        "KC-API-PASSPHRASE": passphrase,
-        "KC-API-KEY-VERSION": "2",
-        "Content-Type": "application/json"
-    }
+async def send_telegram_message(message):
+    await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
 
 async def get_balance():
-    endpoint = "/api/v1/accounts?type=trade"
-    headers = get_headers(endpoint)
-    response = requests.get(BASE_URL + endpoint, headers=headers)
-    balances = response.json()["data"]
-    for asset in balances:
-        if asset["currency"] == "USDT":
-            return float(asset["available"])
-    return 0.0
+    usdt_balance = client.get_currency_balance('USDT')
+    return float(usdt_balance['available'])
+
+async def get_price(pair):
+    ticker = client.get_ticker(pair)
+    return float(ticker['price'])
 
 async def open_trade(pair):
+    global is_in_trade
     balance = await get_balance()
-    if balance < 5:
-        await send_telegram("⚠️ No tienes saldo suficiente para operar.")
+    amount_to_spend = balance * investment_percentage
+
+    if amount_to_spend < 5:  # KuCoin mínimo de $5
+        await send_telegram_message("⚠️ No hay suficiente saldo para abrir operación.")
         return
 
-    order_size = round(balance * 0.98, 2)  # Usamos 98% del saldo disponible
+    price = await get_price(pair)
+    size = round(amount_to_spend / price, 6)
 
-    # Crear orden de compra a mercado
-    endpoint = "/api/v1/orders"
-    body = json.dumps({
-        "symbol": pair,
-        "side": "buy",
-        "type": "market",
-        "funds": str(order_size)
-    })
-    headers = get_headers(endpoint, method="POST", body=body)
-    response = requests.post(BASE_URL + endpoint, headers=headers, data=body)
-    data = response.json()
-    
-    if data.get("code") == "200000":
-        await send_telegram(f"✅ COMPRA realizada en {pair}")
-        await monitor_trade(pair)
-    else:
-        await send_telegram(f"❌ Error al comprar {pair}: {data.get('msg', 'Error desconocido')}")
+    try:
+        order = client.create_market_order(pair, 'buy', size=size)
+        await send_telegram_message(f"✅ Compra ejecutada: {pair} - Cantidad: {size}")
+        is_in_trade = True
+        await monitor_trade(pair, size)
+    except Exception as e:
+        await send_telegram_message(f"⚠️ Error abriendo operación: {e}")
 
-async def monitor_trade(pair):
-    await asyncio.sleep(3)  # Simulación para el monitoreo
-    # Luego aquí pondremos una simulación de venta:
-    await close_trade(pair)
+async def monitor_trade(pair, size):
+    global is_in_trade
+    entry_price = await get_price(pair)
+    await send_telegram_message(f"⏳ Monitoreando operación en {pair}...")
 
-async def close_trade(pair):
-    # Crear orden de venta a mercado
-    endpoint = "/api/v1/orders"
-    body = json.dumps({
-        "symbol": pair,
-        "side": "sell",
-        "type": "market",
-        "size": "100%"  # Puedes ajustar esto si necesitas
-    })
-    headers = get_headers(endpoint, method="POST", body=body)
-    response = requests.post(BASE_URL + endpoint, headers=headers, data=body)
-    data = response.json()
-
-    if data.get("code") == "200000":
-        await send_telegram(f"✅ VENTA realizada en {pair}")
-    else:
-        await send_telegram(f"❌ Error al vender {pair}: {data.get('msg', 'Error desconocido')}")
-
-async def main():
     while True:
-        for pair in PAIRS:
-            await open_trade(pair)
-            await asyncio.sleep(60)  # Espera 1 minuto entre operaciones
-        await asyncio.sleep(60)  # Cada ciclo total espera 1 minuto antes de repetir
+        await asyncio.sleep(10)
+        current_price = await get_price(pair)
+        change = (current_price - entry_price) / entry_price
 
-if __name__ == "__main__":
-    asyncio.run(main())
+        if change >= profit_target:
+            # Tomar ganancia
+            try:
+                client.create_market_order(pair, 'sell', size=size)
+                await send_telegram_message(f"✅ Venta con GANANCIA en {pair} - {round(change*100, 2)}%")
+                is_in_trade = False
+                break
+            except Exception as e:
+                await send_telegram_message(f"⚠️ Error vendiendo: {e}")
+                break
+        elif change <= -stop_loss_threshold:
+            # Stop Loss
+            try:
+                client.create_market_order(pair, 'sell', size=size)
+                await send_telegram_message(f"❌ Venta con PÉRDIDA en {pair} - {round(change*100, 2)}%")
+                is_in_trade = False
+                break
+            except Exception as e:
+                await send_telegram_message(f"⚠️ Error vendiendo (Stop Loss): {e}")
+                break
+
+async def scan_market():
+    while True:
+        if not is_in_trade:
+            best_pair = None
+            best_volatility = 0
+
+            for pair in pairs_to_trade:
+                try:
+                    price_now = await get_price(pair)
+                    await asyncio.sleep(1)
+                    price_later = await get_price(pair)
+                    change = abs(price_later - price_now) / price_now
+
+                    if change > best_volatility:
+                        best_volatility = change
+                        best_pair = pair
+                except Exception as e:
+                    await send_telegram_message(f"⚠️ Error analizando {pair}: {e}")
+
+            if best_pair:
+                await open_trade(best_pair)
+        
+        await asyncio.sleep(10)
+
+async def start_bot():
+    await send_telegram_message("🚀 ZafroBot Scalper PRO v1 Iniciado.")
+    await scan_market()
+
+if __name__ == '__main__':
+    loop = asyncio.get_event_loop()
+    loop.create_task(start_bot())
+    executor.start_polling(dp, skip_updates=True)
