@@ -1,112 +1,107 @@
 import os
+import time
+import hmac
+import hashlib
+import base64
+import json
+import aiohttp
 import asyncio
-import logging
-import requests
 from kucoin.client import Client
 from aiogram import Bot, Dispatcher, types
+from aiogram.types import BotCommand
 from aiogram.enums import ParseMode
-from dotenv import load_dotenv
 
-# Cargar variables de entorno
-load_dotenv()
+# Variables de entorno
+API_KEY = os.getenv("API_KEY")
+API_SECRET = os.getenv("SECRET_KEY")
+API_PASSPHRASE = os.getenv("API_PASSPHRASE")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
 
-API_KEY = os.getenv('API_KEY')
-API_SECRET = os.getenv('SECRET_KEY')
-API_PASS = os.getenv('API_PASS')
-TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-CHAT_ID = os.getenv('CHAT_ID')
-
-# Configurar el cliente de KuCoin
-client = Client(API_KEY, API_SECRET, API_PASS)
+# Parámetros de Trading
+PAIRS = ["SEI-USDT", "ACH-USDT", "CVC-USDT"]
+TRADE_PERCENTAGE = 0.95  # Usa el 95% del balance disponible
+TAKE_PROFIT_PERCENT = 1.8  # 1.8% de ganancia
+STOP_LOSS_PERCENT = 1.2    # 1.2% de pérdida máxima
 
 # Inicializar bot de Telegram
-bot = Bot(token=TELEGRAM_BOT_TOKEN, parse_mode=ParseMode.HTML)
-dp = Dispatcher()
+bot = Bot(token=TELEGRAM_BOT_TOKEN, default=BotCommand)
+dp = Dispatcher(bot=bot)
 
-# Parámetros de trading
-TRADING_PAIRS = ["SEI-USDT", "ACH-USDT", "SNT-USDT"]  # Pares seleccionados
-TRADE_AMOUNT = 15  # Monto en USDT por operación
-TAKE_PROFIT_PERCENT = 1.5
-STOP_LOSS_PERCENT = 1.0
+# Cliente de KuCoin
+client = Client(API_KEY, API_SECRET, API_PASSPHRASE)
 
-async def send_telegram_message(message):
-    """Enviar mensaje al Telegram"""
-    await bot.send_message(chat_id=CHAT_ID, text=message)
+async def enviar_mensaje(mensaje):
+    await bot.send_message(chat_id=CHAT_ID, text=mensaje, parse_mode=ParseMode.HTML)
 
-async def get_balance():
-    """Obtener saldo disponible en USDT"""
-    balances = client.get_accounts()
-    for balance in balances:
-        if balance['currency'] == 'USDT' and balance['type'] == 'trade':
-            return float(balance['available'])
+async def obtener_balance_usdt():
+    accounts = await client.get_accounts()
+    for account in accounts:
+        if account['currency'] == 'USDT' and account['type'] == 'trade':
+            return float(account['available'])
     return 0.0
 
-async def open_trade(pair):
-    """Abrir una operación de compra"""
-    balance = await get_balance()
-    if balance < TRADE_AMOUNT:
-        await send_telegram_message("⚠️ Saldo insuficiente para operar.")
-        return None
+async def analizar_par(par):
+    ticker = await client.get_ticker(par)
+    last_price = float(ticker['price'])
+    return last_price
 
-    # Precio actual
-    ticker = client.get_ticker(pair)
-    price = float(ticker['price'])
+async def abrir_operacion(par):
+    balance = await obtener_balance_usdt()
+    if balance < 5:
+        await enviar_mensaje("❌ Saldo insuficiente para operar.")
+        return
 
-    quantity = round(TRADE_AMOUNT / price, 4)
+    precio_compra = await analizar_par(par)
+    cantidad = (balance * TRADE_PERCENTAGE) / precio_compra
 
     try:
-        order = client.create_market_order(
-            symbol=pair,
-            side="buy",
-            size=quantity
-        )
-        await send_telegram_message(f"✅ Compra ejecutada: {quantity} {pair} a {price} USDT.")
-        return {"order_id": order['orderId'], "price": price, "quantity": quantity}
-    except Exception as e:
-        await send_telegram_message(f"❌ Error al comprar: {e}")
-        return None
+        order = await client.create_market_order(par, 'buy', size=round(cantidad, 4))
+        await enviar_mensaje(f"✅ Compra realizada en {par} a precio de mercado: {precio_compra:.4f} USDT")
 
-async def close_trade(pair, quantity):
-    """Cerrar una operación de venta"""
-    try:
-        order = client.create_market_order(
-            symbol=pair,
-            side="sell",
-            size=quantity
-        )
-        await send_telegram_message(f"✅ Venta ejecutada de {quantity} {pair}.")
-    except Exception as e:
-        await send_telegram_message(f"❌ Error al vender: {e}")
+        await monitorear_operacion(par, precio_compra)
 
-async def monitor_trade(pair, entry_price, quantity):
-    """Monitorear operación abierta"""
+    except Exception as e:
+        await enviar_mensaje(f"⚠️ Error al abrir operación: {str(e)}")
+
+async def monitorear_operacion(par, precio_entrada):
+    take_profit = precio_entrada * (1 + TAKE_PROFIT_PERCENT / 100)
+    stop_loss = precio_entrada * (1 - STOP_LOSS_PERCENT / 100)
+
     while True:
-        ticker = client.get_ticker(pair)
-        current_price = float(ticker['price'])
-
-        if current_price >= entry_price * (1 + TAKE_PROFIT_PERCENT / 100):
-            await close_trade(pair, quantity)
-            break
-        elif current_price <= entry_price * (1 - STOP_LOSS_PERCENT / 100):
-            await close_trade(pair, quantity)
+        precio_actual = await analizar_par(par)
+        
+        if precio_actual >= take_profit:
+            balance = await obtener_balance_par(par)
+            if balance > 0:
+                await client.create_market_order(par, 'sell', size=balance)
+                await enviar_mensaje(f"✅ ¡Take Profit alcanzado! Vendido {par} a {precio_actual:.4f} USDT")
             break
 
-        await asyncio.sleep(5)  # Esperar 5 segundos antes de volver a revisar
+        if precio_actual <= stop_loss:
+            balance = await obtener_balance_par(par)
+            if balance > 0:
+                await client.create_market_order(par, 'sell', size=balance)
+                await enviar_mensaje(f"⚠️ Stop Loss activado. Vendido {par} a {precio_actual:.4f} USDT")
+            break
 
-async def trading_cycle():
-    """Ciclo de trading principal"""
-    while True:
-        for pair in TRADING_PAIRS:
-            trade = await open_trade(pair)
-            if trade:
-                await monitor_trade(pair, trade['price'], trade['quantity'])
-        await asyncio.sleep(5)
+        await asyncio.sleep(10)
+
+async def obtener_balance_par(par):
+    symbol = par.split("-")[0]
+    accounts = await client.get_accounts()
+    for account in accounts:
+        if account['currency'] == symbol and account['type'] == 'trade':
+            return float(account['available'])
+    return 0.0
 
 async def main():
-    """Inicializar el bot"""
-    logging.basicConfig(level=logging.INFO)
-    await send_telegram_message("🤖 ZafroBot Scalper PRO v1 iniciado.")
-    await trading_cycle()
+    await enviar_mensaje("🚀 ZafroBot Scalper PRO v1 ha iniciado correctamente.")
+
+    while True:
+        for par in PAIRS:
+            await abrir_operacion(par)
+            await asyncio.sleep(5)
 
 if __name__ == "__main__":
     asyncio.run(main())
