@@ -1,125 +1,121 @@
 import os
+import asyncio
+import aiohttp
 import hmac
+import hashlib
 import base64
 import time
-import json
-import aiohttp
-from hashlib import sha256
 from aiogram import Bot, Dispatcher, types
-from aiogram.enums.parse_mode import ParseMode
-import asyncio
+from aiogram.filters import Command
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # Variables de entorno
 API_KEY = os.getenv('API_KEY')
 API_SECRET = os.getenv('SECRET_KEY')
-API_PASSPHRASE = os.getenv('API_PASSPHRASE')
+API_PASSPHRASE = os.getenv('PHRASE')  # Clave de la trading password
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-CHAT_ID = os.getenv('CHAT_ID')
+CHAT_ID = int(os.getenv('CHAT_ID'))
 
-BASE_URL = "https://api.kucoin.com"
-
-# Inicializar el bot de Telegram
-bot = Bot(token=TELEGRAM_BOT_TOKEN, parse_mode=ParseMode.HTML)
+# Inicializar bot y dispatcher
+bot = Bot(token=TELEGRAM_BOT_TOKEN)
 dp = Dispatcher()
 
-# Función para enviar mensaje a Telegram
-async def send_telegram_message(message):
-    await bot.send_message(chat_id=CHAT_ID, text=message)
+# Estado global del bot
+bot_activo = False
 
-# Función para hacer peticiones a KuCoin
-async def kucoin_request(method, endpoint, payload=None):
+# Crear teclado de control
+keyboard = InlineKeyboardMarkup(inline_keyboard=[
+    [InlineKeyboardButton(text="✅ Encender Bot", callback_data="encender")],
+    [InlineKeyboardButton(text="⛔ Apagar Bot", callback_data="apagar")],
+    [InlineKeyboardButton(text="ℹ️ Ver Estado", callback_data="estado")],
+    [InlineKeyboardButton(text="🔄 Actualizar Saldo", callback_data="saldo")]
+])
+
+# Función para firmar solicitudes KuCoin
+def sign_request(endpoint, method='GET', body=''):
     now = int(time.time() * 1000)
-    payload_json = json.dumps(payload) if payload else ''
-    str_to_sign = f"{now}{method}{endpoint}{payload_json}"
-    
-    signature = base64.b64encode(
-        hmac.new(API_SECRET.encode('utf-8'), str_to_sign.encode('utf-8'), sha256).digest()
-    ).decode()
-    
-    passphrase = base64.b64encode(
-        hmac.new(API_SECRET.encode('utf-8'), API_PASSPHRASE.encode('utf-8'), sha256).digest()
-    ).decode()
-
+    str_to_sign = str(now) + method + endpoint + body
+    signature = base64.b64encode(hmac.new(API_SECRET.encode('utf-8'), str_to_sign.encode('utf-8'), hashlib.sha256).digest())
+    passphrase = base64.b64encode(hmac.new(API_SECRET.encode('utf-8'), API_PASSPHRASE.encode('utf-8'), hashlib.sha256).digest())
     headers = {
         "KC-API-KEY": API_KEY,
-        "KC-API-SIGN": signature,
+        "KC-API-SIGN": signature.decode(),
         "KC-API-TIMESTAMP": str(now),
-        "KC-API-PASSPHRASE": passphrase,
+        "KC-API-PASSPHRASE": passphrase.decode(),
         "KC-API-KEY-VERSION": "2",
         "Content-Type": "application/json"
     }
-    
-    async with aiohttp.ClientSession() as session:
-        url = BASE_URL + endpoint
-        if method == "GET":
-            async with session.get(url, headers=headers) as response:
-                return await response.json()
-        elif method == "POST":
-            async with session.post(url, headers=headers, data=payload_json) as response:
-                return await response.json()
+    return headers
 
-# Función para consultar el saldo disponible en USDT
-async def get_balance():
-    try:
-        response = await kucoin_request("GET", "/api/v1/accounts")
-        for account in response.get('data', []):
-            if account['currency'] == 'USDT' and account['type'] == 'trade':
-                return float(account['available'])
-    except Exception as e:
-        await send_telegram_message(f"Error obteniendo balance: {e}")
-    return 0.0
-
-# Función para abrir una operación de compra
-async def open_trade(symbol):
-    balance = await get_balance()
-    if balance <= 0:
-        await send_telegram_message("No hay saldo disponible para operar.")
+# Comando de inicio
+@dp.message(Command(commands=["start"]))
+async def start_command(message: types.Message):
+    if message.chat.id != CHAT_ID:
         return
-    
-    # Usamos 95% del saldo para cada operación
-    usdt_to_spend = balance * 0.95
+    await message.answer(
+        "🚀 ¡Bienvenido a ZafroBot Scalper PRO v1!\n\n"
+        "Usa los botones para controlar el bot:\n\n"
+        "✅ Encender Bot\n"
+        "⛔ Apagar Bot\n"
+        "ℹ️ Ver Estado\n"
+        "🔄 Actualizar Saldo\n\n"
+        "🔥 ¡Vamos por todo, Zafronock!",
+        reply_markup=keyboard
+    )
 
-    order = {
-        "clientOid": str(int(time.time() * 1000)),
-        "side": "buy",
-        "symbol": symbol,
-        "type": "market",
-        "funds": str(usdt_to_spend)
-    }
-    try:
-        response = await kucoin_request("POST", "/api/v1/orders", order)
-        if response.get('code') == "200000":
-            await send_telegram_message(f"¡Compra realizada en {symbol}!")
-        else:
-            await send_telegram_message(f"Error al comprar {symbol}: {response}")
-    except Exception as e:
-        await send_telegram_message(f"Error abriendo operación: {e}")
+# Función para consultar saldo disponible en Trading Wallet
+async def consultar_saldo():
+    url = "https://api.kucoin.com/api/v1/accounts?type=trade"
+    headers = sign_request("/api/v1/accounts?type=trade")
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, headers=headers) as resp:
+            data = await resp.json()
+            usdt_balance = next((item for item in data['data'] if item['currency'] == 'USDT'), None)
+            if usdt_balance:
+                return float(usdt_balance['available'])
+            return 0.0
 
-# Función principal para escanear y operar
-async def main_loop():
-    symbols = ["SEI-USDT", "ACH-USDT", "CVC-USDT"]
+# Función para mandar el estado actual
+async def estado_actual(message: types.Message):
+    saldo = await consultar_saldo()
+    await message.answer(f"💰 Saldo disponible en Wallet de Trading: {saldo:.2f} USDT")
 
+# Botón de acciones
+@dp.callback_query()
+async def botones_control(callback: types.CallbackQuery):
+    global bot_activo
+
+    if callback.message.chat.id != CHAT_ID:
+        return
+
+    if callback.data == "encender":
+        bot_activo = True
+        await callback.message.answer("✅ ZafroBot Scalper PRO está ahora ACTIVADO.")
+    elif callback.data == "apagar":
+        bot_activo = False
+        await callback.message.answer("⛔ ZafroBot Scalper PRO ha sido APAGADO.")
+    elif callback.data == "estado":
+        await estado_actual(callback.message)
+    elif callback.data == "saldo":
+        saldo = await consultar_saldo()
+        await callback.message.answer(f"🔄 Saldo actualizado: {saldo:.2f} USDT")
+
+    await callback.answer()
+
+# Ciclo de análisis continuo
+async def ciclo_bot():
+    global bot_activo
     while True:
-        for symbol in symbols:
-            try:
-                ticker = await kucoin_request("GET", f"/api/v1/market/orderbook/level1?symbol={symbol}")
-                price = float(ticker['data']['price'])
-                
-                # Aquí puedes agregar tus condiciones de scalping para comprar/vender
-                if price > 0:  # De momento solo validamos precio válido
-                    await open_trade(symbol)
-                    
-                    # Luego de abrir una operación, esperamos 30 segundos antes de volver a escanear
-                    await asyncio.sleep(30)
-            except Exception as e:
-                await send_telegram_message(f"Error analizando {symbol}: {e}")
+        if bot_activo:
+            # Aquí va el análisis real que estamos por integrar (scalping, volumen, impulso, etc.)
+            await asyncio.sleep(10)  # Simulación de análisis de mercado cada 10s
+        else:
+            await asyncio.sleep(5)
 
-        await asyncio.sleep(10)  # Tiempo entre cada ciclo de escaneo
-
-# Ejecución
-async def start_bot():
-    await send_telegram_message("✅ ZafroBot Scalper PRO v1 iniciado correctamente.")
-    await main_loop()
+# Lanzar bot
+async def main():
+    asyncio.create_task(ciclo_bot())
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    asyncio.run(start_bot())
+    asyncio.run(main())
