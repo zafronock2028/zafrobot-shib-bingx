@@ -4,9 +4,6 @@ import time
 import hmac
 import hashlib
 import asyncio
-import websockets
-import gzip
-import json
 from aiogram import Bot, Dispatcher, types
 from aiogram.enums import ParseMode
 from aiogram.filters import CommandStart, Command
@@ -43,77 +40,32 @@ def keep_alive():
     server = threading.Thread(target=run)
     server.start()
 
-# Variable global para saldo actualizado
-saldo_actual_spot = 0.0
-
-# Función para firmar WebSocket auth
-def create_signature(secret_key, timestamp):
-    payload = f"timestamp={timestamp}"
-    signature = hmac.new(secret_key.encode('utf-8'), payload.encode('utf-8'), hashlib.sha256).hexdigest()
-    return signature
-
-# WebSocket privado para actualizar saldo en vivo
-async def websocket_saldo_bingx():
-    global saldo_actual_spot
-    url = "wss://open-api-swap.bingx.com/swap-market"
-    while True:
-        try:
-            async with websockets.connect(url) as websocket:
-                timestamp = str(int(time.time() * 1000))
-                sign = create_signature(secret_key, timestamp)
-                
-                auth_payload = {
-                    "id": "auth",
-                    "reqType": "subscribe",
-                    "data": {
-                        "apiKey": api_key,
-                        "timestamp": timestamp,
-                        "signature": sign
-                    }
-                }
-                
-                await websocket.send(json.dumps(auth_payload))
-                logging.info("Autenticado al WebSocket de BingX.")
-
-                subscribe_payload = {
-                    "id": "balance_subscribe",
-                    "reqType": "subscribe",
-                    "data": {
-                        "channel": "balance"
-                    }
-                }
-                
-                await websocket.send(json.dumps(subscribe_payload))
-                logging.info("Suscripto al canal de balance.")
-                
-                while True:
-                    response = await websocket.recv()
-                    
-                    try:
-                        decompressed_data = gzip.decompress(response).decode('utf-8')
-                        data = json.loads(decompressed_data)
-                    except:
-                        try:
-                            data = json.loads(response)
-                        except:
-                            continue  # Ignorar mensajes que no sean JSON
-
-                    # Validar que el mensaje tenga la estructura correcta y no sea None
-                    if not isinstance(data, dict):
-                        continue
-                    if "data" not in data or data["data"] is None:
-                        continue
-                    if "balances" not in data["data"]:
-                        continue
-
-                    balances = data["data"]["balances"]
-                    for asset in balances:
-                        if asset['asset'] == 'USDT':
-                            saldo_actual_spot = float(asset['availableMargin'])
-                            logging.info(f"Nuevo saldo Spot detectado: {saldo_actual_spot} USDT")
-        except Exception as e:
-            logging.error(f"Error en WebSocket: {e}")
-            await asyncio.sleep(5)
+# Función para consultar saldo Spot por REST API
+def obtener_saldo_spot():
+    try:
+        timestamp = str(int(time.time() * 1000))
+        params = f'timestamp={timestamp}'
+        signature = hmac.new(secret_key.encode('utf-8'), params.encode('utf-8'), hashlib.sha256).hexdigest()
+        
+        headers = {
+            'X-BX-APIKEY': api_key
+        }
+        
+        url = f"https://open-api.bingx.com/openApi/spot/v1/account/balance?{params}&signature={signature}"
+        response = requests.get(url, headers=headers)
+        data = response.json()
+        
+        if data['code'] == 0:
+            balances = data['data']['balances']
+            for balance in balances:
+                if balance['asset'] == 'USDT':
+                    return float(balance['free'])
+            return 0.0
+        else:
+            return None
+    except Exception as e:
+        logging.error(f"Error obteniendo saldo: {e}")
+        return None
 
 # Comando /start
 @dp.message(CommandStart())
@@ -121,52 +73,43 @@ async def start_handler(message: Message):
     await message.answer(
         "**Bienvenido a ZafroBot Notifier PRO**\n\n"
         "✅ Bot activo y listo.\n"
-        "👉 Usa /saldo para ver tu saldo Spot actualizado en tiempo real.",
+        "👉 Usa /saldo para ver tu saldo Spot actualizado.",
         parse_mode=ParseMode.MARKDOWN
     )
 
-# Comando /saldo con efecto animado y tarjeta elegante
+# Comando /saldo que consulta en vivo
 @dp.message(Command("saldo"))
 async def saldo_handler(message: Message):
-    if saldo_actual_spot > 0:
-        mensaje_espera = await message.answer(
-            "💸 *Consultando saldo en tiempo real...*",
-            parse_mode=ParseMode.MARKDOWN
-        )
-        
-        await asyncio.sleep(1.5)
+    mensaje_espera = await message.answer(
+        "💸 *Consultando saldo en vivo...*",
+        parse_mode=ParseMode.MARKDOWN
+    )
 
+    saldo = obtener_saldo_spot()
+    
+    if saldo is not None:
+        await asyncio.sleep(1)
         await mensaje_espera.edit_text(
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"💳 *ZafroBot Wallet*\n"
             f"━━━━━━━━━━━━━━━━━━━━\n\n"
             f"💰 *Saldo disponible en Spot:*\n"
-            f"`{saldo_actual_spot:.2f} USDT`\n\n"
+            f"`{saldo:.2f} USDT`\n\n"
             f"🕒 _Actualizado en tiempo real_\n"
             f"━━━━━━━━━━━━━━━━━━━━",
             parse_mode=ParseMode.MARKDOWN
         )
     else:
-        await message.answer(
-            "⚠️ *El saldo aún no ha sido detectado.*\n"
-            "_Por favor intenta en unos segundos._",
+        await mensaje_espera.edit_text(
+            "⚠️ *No se pudo obtener el saldo.*\n"
+            "_Por favor intenta nuevamente más tarde._",
             parse_mode=ParseMode.MARKDOWN
         )
 
-# Función principal segura
-async def start_bot():
-    while True:
-        try:
-            await asyncio.gather(
-                dp.start_polling(bot),
-                websocket_saldo_bingx()
-            )
-        except Exception as e:
-            logging.error(f"Error general: {e}")
-            logging.info("Reintentando en 5 segundos...")
-            await asyncio.sleep(5)
+# Función principal
+async def main():
+    await dp.start_polling(bot)
 
-# Lanzar Flask y Bot
 if __name__ == "__main__":
     keep_alive()
-    asyncio.run(start_bot())
+    asyncio.run(main())
