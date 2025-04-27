@@ -1,79 +1,81 @@
-import asyncio
+import time
 import hmac
 import hashlib
-import time
-import aiohttp
-from aiogram import Bot, Dispatcher, types
-from aiogram.filters import Command
+import requests
+from aiogram import Bot, Dispatcher, executor, types
 
-# Tus APIs integradas
+# ====== TUS CREDENCIALES API (ya integradas) ======
 API_KEY = "RA2cfzSaJKWxDrVEXitoiLZK1dpfEQLaCe8TIdG77Nl2GJEiImL7eXRRWIJDdjwYpakLIa37EQIpI6jpQ"
-SECRET_KEY = "VlwOFCk2hsJxth98TQLZoHf7HLDxDCNHuGmIKyhHgh9UoturNTon3rkiLwtbsr1zxqZcOvVyWNCILFDzVVLg"
-TELEGRAM_TOKEN = "8100886306:AAFRDnn32wMKXhZGfkThifFFGPhL0p6KFjw"
-CHAT_ID = "1130366010"
+API_SECRET = "VlwOFCk2hsJxth98TQLZoHf7HLDxDCNHuGmIKyhHgh9UoturNTon3rkiLwtbsr1zxqZcOvVyWNCILFDzVVLg"
 
-bot = Bot(token=TELEGRAM_TOKEN)
-dp = Dispatcher()
+# ====== TU TOKEN DE TELEGRAM (ya lo tienes configurado en Render) ======
+BOT_TOKEN = "TU_TELEGRAM_BOT_TOKEN"
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher(bot)
 
-# Función para consultar saldo de USDT en SPOT
-async def consultar_saldo_spot():
-    url = "https://open-api.bingx.com/openApi/spot/v1/account/assets"
-
-    timestamp = int(time.time() * 1000)
-    params = {
-        "apiKey": API_KEY,
-        "timestamp": timestamp
+# ====== FUNCIÓN PARA OBTENER EL SALDO USDT EN SPOT ======
+def get_spot_usdt_balance():
+    url = "https://open-api.bingx.com/openApi/user/getBalance"
+    timestamp = str(int(time.time() * 1000))
+    query_string = f"timestamp={timestamp}"
+    signature = hmac.new(API_SECRET.encode('utf-8'), query_string.encode('utf-8'), hashlib.sha256).hexdigest()
+    headers = {
+        'X-BX-APIKEY': API_KEY
     }
-    # Crear firma HMAC-SHA256
-    query_string = "&".join([f"{key}={params[key]}" for key in sorted(params)])
-    signature = hmac.new(SECRET_KEY.encode('utf-8'), query_string.encode('utf-8'), hashlib.sha256).hexdigest()
-    params["sign"] = signature
-
-    async with aiohttp.ClientSession() as session:
-        try:
-            async with session.get(url, params=params) as resp:
-                if resp.status != 200:
-                    return None
-                data = await resp.json()
-                if "data" in data:
-                    for asset in data["data"]:
-                        if asset.get("asset") == "USDT":
-                            balance = float(asset.get("available", 0))
-                            return round(balance, 2)
-                return None
-        except Exception as e:
-            print(f"Error consultando saldo: {e}")
+    params = {
+        'timestamp': timestamp,
+        'signature': signature
+    }
+    try:
+        response = requests.get(url, headers=headers, params=params, timeout=10)
+        data = response.json()
+        if data.get('code') == 0:
+            balances = data['data']['balances']
+            for asset in balances:
+                if asset['asset'] == 'USDT':
+                    return float(asset['balance'])
             return None
+        else:
+            return None
+    except Exception as e:
+        return None
 
-# Comando /start
-@dp.message(Command("start"))
+# ====== COMANDO /start ======
+@dp.message_handler(commands=['start'])
 async def start(message: types.Message):
-    await message.answer(
+    text = (
         "**[[ ZafroBot Dinámico Pro ]]**\n\n"
-        "🤖 Estoy listo para ayudarte a consultar tu saldo real de USDT en tu cuenta SPOT.\n\n"
-        "Usa el comando /saldo para verlo en tiempo real."
+        "🤖 ¡Estoy listo para ayudarte a consultar tu saldo real de **USDT** en tu cuenta **SPOT** de BingX!\n\n"
+        "Usa el comando /saldo para verlo en **tiempo real**."
     )
+    await message.answer(text, parse_mode="Markdown")
 
-# Comando /saldo
-@dp.message(Command("saldo"))
+# ====== COMANDO /saldo ======
+@dp.message_handler(commands=['saldo'])
 async def saldo(message: types.Message):
-    saldo_usdt = await consultar_saldo_spot()
-    if saldo_usdt is not None:
-        await message.answer(
-            f"**[[ ZafroBot Dinámico Pro ]]**\n\n"
-            f"*Saldo actual disponible en SPOT:*\n\n"
-            f"**{saldo_usdt} USDT**"
+    retry_count = 0
+    balance = None
+    while retry_count < 3 and balance is None:
+        balance = get_spot_usdt_balance()
+        if balance is None:
+            time.sleep(2)
+            retry_count += 1
+
+    if balance is not None:
+        text = (
+            "**[[ ZafroBot Dinámico Pro ]]**\n\n"
+            "💰 Tu saldo actual en Spot es:\n\n"
+            f"**{balance:.2f} USDT**"
         )
     else:
-        await message.answer(
+        text = (
             "**[[ ZafroBot Dinámico Pro ]]**\n\n"
             "⚠️ No fue posible obtener tu saldo actual.\n\n"
             "_Por favor intenta nuevamente en unos minutos._"
         )
 
-async def main():
-    await bot.delete_webhook(drop_pending_updates=True)
-    await dp.start_polling(bot)
+    await message.answer(text, parse_mode="Markdown")
 
+# ====== INICIAR BOT ======
 if __name__ == "__main__":
-    asyncio.run(main())
+    executor.start_polling(dp, skip_updates=True)
