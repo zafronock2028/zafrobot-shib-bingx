@@ -1,6 +1,7 @@
 from flask import Flask
 from threading import Thread
-from aiogram import Bot, Dispatcher, types
+from aiogram import Bot, Dispatcher, Router, types
+from aiogram.filters import Command
 import asyncio
 
 # Token de tu bot de Telegram
@@ -9,6 +10,8 @@ TOKEN = "7768905391:AAGn5T2JiPe4RU_pmFWlhXc2Sn4OriV0CGM"
 # Crear instancia del bot
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
+router = Router()
+dp.include_router(router)
 
 # Mantener vivo el servidor con Flask
 app = Flask(__name__)
@@ -25,7 +28,7 @@ def keep_alive():
     t.start()
 
 # Manejador para el comando /start
-@dp.message_handler(commands=["start"])
+@router.message(Command("start"))
 async def start(message: types.Message):
     await message.answer("✅ Bot activo y recibiendo mensajes correctamente.")
 
