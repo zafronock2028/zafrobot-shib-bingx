@@ -30,7 +30,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "ZafroBot Notifier PRO corriendo."
+    return "ZafroBot Notifier corriendo."
 
 def run():
     port = int(os.environ.get("PORT", 10000))
@@ -40,8 +40,8 @@ def keep_alive():
     server = threading.Thread(target=run)
     server.start()
 
-# Función para consultar saldo Spot por REST API
-def obtener_saldo_spot():
+# Función para consultar solo el saldo real de USDT libre en Spot
+def obtener_saldo_usdt():
     try:
         timestamp = str(int(time.time() * 1000))
         params = f'timestamp={timestamp}'
@@ -54,13 +54,13 @@ def obtener_saldo_spot():
         url = f"https://open-api.bingx.com/openApi/spot/v1/account/balance?{params}&signature={signature}"
         response = requests.get(url, headers=headers)
         data = response.json()
-        
+
         if data['code'] == 0:
             balances = data['data']['balances']
             for balance in balances:
                 if balance['asset'] == 'USDT':
                     return float(balance['free'])
-            return 0.0
+            return 0.0  # Si no encuentra USDT, devuelve 0
         else:
             return None
     except Exception as e:
@@ -77,15 +77,15 @@ async def start_handler(message: Message):
         parse_mode=ParseMode.MARKDOWN
     )
 
-# Comando /saldo que consulta en vivo
+# Comando /saldo actualizado
 @dp.message(Command("saldo"))
 async def saldo_handler(message: Message):
     mensaje_espera = await message.answer(
-        "💸 *Consultando saldo en vivo...*",
+        "💸 *Consultando saldo de USDT...*",
         parse_mode=ParseMode.MARKDOWN
     )
 
-    saldo = obtener_saldo_spot()
+    saldo = obtener_saldo_usdt()
     
     if saldo is not None:
         await asyncio.sleep(1)
@@ -93,7 +93,7 @@ async def saldo_handler(message: Message):
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"💳 *ZafroBot Wallet*\n"
             f"━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"💰 *Saldo disponible en Spot:*\n"
+            f"💰 *Saldo USDT disponible en Spot:*\n"
             f"`{saldo:.2f} USDT`\n\n"
             f"🕒 _Actualizado en tiempo real_\n"
             f"━━━━━━━━━━━━━━━━━━━━",
@@ -101,8 +101,8 @@ async def saldo_handler(message: Message):
         )
     else:
         await mensaje_espera.edit_text(
-            "⚠️ *No se pudo obtener el saldo.*\n"
-            "_Por favor intenta nuevamente más tarde._",
+            "⚠️ *No se pudo obtener tu saldo USDT.*\n"
+            "_Por favor intenta nuevamente._",
             parse_mode=ParseMode.MARKDOWN
         )
 
