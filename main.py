@@ -96,12 +96,14 @@ async def websocket_saldo_bingx():
                         try:
                             data = json.loads(response)
                         except:
-                            continue  # Ignorar si no se puede descomprimir ni leer
+                            continue  # Ignorar mensajes que no sean JSON
 
-                    # Validar que el mensaje tenga estructura correcta
+                    # Validar que el mensaje tenga la estructura correcta y no sea None
                     if not isinstance(data, dict):
                         continue
-                    if "data" not in data or "balances" not in data["data"]:
+                    if "data" not in data or data["data"] is None:
+                        continue
+                    if "balances" not in data["data"]:
                         continue
 
                     balances = data["data"]["balances"]
@@ -111,7 +113,7 @@ async def websocket_saldo_bingx():
                             logging.info(f"Nuevo saldo Spot detectado: {saldo_actual_spot} USDT")
         except Exception as e:
             logging.error(f"Error en WebSocket: {e}")
-            await asyncio.sleep(5)  # Reintentar conexión si falla
+            await asyncio.sleep(5)
 
 # Comando /start
 @dp.message(CommandStart())
