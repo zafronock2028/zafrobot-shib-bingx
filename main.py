@@ -75,7 +75,6 @@ async def websocket_saldo_bingx():
                 await websocket.send(json.dumps(auth_payload))
                 logging.info("Autenticado al WebSocket de BingX.")
 
-                # Subscribirse al canal de balance
                 subscribe_payload = {
                     "id": "balance_subscribe",
                     "reqType": "subscribe",
@@ -90,23 +89,29 @@ async def websocket_saldo_bingx():
                 while True:
                     response = await websocket.recv()
                     
-                    # Descomprimir la respuesta si está comprimida
                     try:
                         decompressed_data = gzip.decompress(response).decode('utf-8')
                         data = json.loads(decompressed_data)
                     except:
-                        # Si no está comprimido, leer como texto normal
-                        data = json.loads(response)
-                    
-                    if "data" in data and "balances" in data["data"]:
-                        balances = data["data"]["balances"]
-                        for asset in balances:
-                            if asset['asset'] == 'USDT':
-                                saldo_actual_spot = float(asset['availableMargin'])  # saldo disponible actualizado
-                                logging.info(f"Nuevo saldo Spot detectado: {saldo_actual_spot} USDT")
+                        try:
+                            data = json.loads(response)
+                        except:
+                            continue  # Ignorar si no se puede descomprimir ni leer
+
+                    # Validar que el mensaje tenga estructura correcta
+                    if not isinstance(data, dict):
+                        continue
+                    if "data" not in data or "balances" not in data["data"]:
+                        continue
+
+                    balances = data["data"]["balances"]
+                    for asset in balances:
+                        if asset['asset'] == 'USDT':
+                            saldo_actual_spot = float(asset['availableMargin'])
+                            logging.info(f"Nuevo saldo Spot detectado: {saldo_actual_spot} USDT")
         except Exception as e:
             logging.error(f"Error en WebSocket: {e}")
-            await asyncio.sleep(5)
+            await asyncio.sleep(5)  # Reintentar conexión si falla
 
 # Comando /start
 @dp.message(CommandStart())
