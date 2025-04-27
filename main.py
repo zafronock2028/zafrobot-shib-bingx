@@ -1,84 +1,91 @@
-import asyncio
+import logging
+from aiogram import Bot, Dispatcher, types
+from aiogram.types import Message
+from aiohttp import web
 import aiohttp
-import time
+import asyncio
+import os
 import hmac
 import hashlib
-from aiogram import Bot, Dispatcher
-from aiogram.filters import Command
-from aiogram.types import Message
+import time
+import json
 
-# Credenciales API
+# Variables de entorno o directas
 API_KEY = "LCRNrSVWUf1crSsLEEtrdDzyIUWdNVtelJTnypigJV9HQ1AfMYhkIxiNazKDNcrGq3vgQjuKspQTjFHeA"
 SECRET_KEY = "Kckg5g1hCDsE9N83n8wpxDjUWk0fGI7VWKVyKRX4wzHIgmi7dXj09B4NdA2MnKTCIw7MhtLV6YLHcemS3Yjg"
 TELEGRAM_BOT_TOKEN = "7768905391:AAGn5T2JiPe4RU_pmFWlhXc2Sn4OriV0CGM"
-CHAT_ID = "1130366010"
+WEBHOOK_URL = "https://zafrobot-shib-bingx.onrender.com/webhook"
 
-# Inicializar bot
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 dp = Dispatcher()
 
-@dp.message(Command(commands=["start"]))
-async def start(message: Message):
-    await message.answer(
-        "👋 ¡Bienvenido a ZafroBot!\n\n"
-        "Este bot te ayuda a consultar tu saldo disponible de **USDT** en tu cuenta Spot de **BingX** en tiempo real.\n\n"
-        "Envía el comando /saldo para ver tu saldo actualizado."
+# Formateo de saldo
+def formatear_tarjeta(saldo):
+    return (
+        "┌───────────────────────────────┐\n"
+        "│     📋 Saldo en Spot           │\n"
+        "├───────────────────────────────┤\n"
+        f"│ 💵 Moneda: USDT                │\n"
+        f"│ 📈 Disponible: {saldo:.2f}            │\n"
+        "├───────────────────────────────┤\n"
+        "│ 🕒 Consulta en tiempo real     │\n"
+        "└───────────────────────────────┘"
     )
 
-@dp.message(Command(commands=["saldo"]))
-async def saldo_spot(message: Message):
-    """Consulta de saldo de USDT en Spot."""
-    timestamp = int(time.time() * 1000)
-    params = {
-        "apiKey": API_KEY,
-        "timestamp": timestamp
-    }
-    query_string = "&".join([f"{key}={params[key]}" for key in sorted(params)])
-    signature = hmac.new(SECRET_KEY.encode('utf-8'), query_string.encode('utf-8'), hashlib.sha256).hexdigest()
-    params["sign"] = signature
+async def obtener_saldo_usdt():
+    timestamp = str(int(time.time() * 1000))
+    query_string = f"timestamp={timestamp}"
+    signature = hmac.new(SECRET_KEY.encode(), query_string.encode(), hashlib.sha256).hexdigest()
+    url = f"https://open-api.bingx.com/openApi/spot/v1/account/balance?{query_string}&signature={signature}"
 
-    url = "https://api.bingx.com/openapi/spot/v1/account/assets"
+    headers = {
+        "X-BX-APIKEY": API_KEY,
+        "Content-Type": "application/json"
+    }
 
     async with aiohttp.ClientSession() as session:
-        try:
-            async with session.get(url, params=params) as resp:
+        async with session.get(url, headers=headers) as resp:
+            if resp.status == 200:
                 data = await resp.json()
-                if resp.status != 200 or not data.get("data"):
-                    await message.answer("❌ No se pudo obtener el saldo de USDT.\nIntenta más tarde.")
-                    return
-        except Exception as e:
-            await message.answer(f"❌ Error en la conexión a BingX API: {e}")
-            return
+                balances = data.get("data", {}).get("balances", [])
+                for balance in balances:
+                    if balance.get("asset") == "USDT":
+                        return float(balance.get("balance", 0))
+            return 0
 
-    balance = 0.0
-    try:
-        assets = data.get("data", [])
-        for asset in assets:
-            if asset.get("asset") == "USDT":
-                balance = float(asset.get("available", 0) or asset.get("balance", 0) or asset.get("free", 0))
-                break
-    except Exception:
-        balance = 0.0
-
-    balance_formatted = "{:.2f}".format(balance)
-
-    mensaje = (
-        "┌───────────────┐\n"
-        "│ 📋 *Saldo en Spot* │\n"
-        "├───────────────┤\n"
-        f"│ 💵 Moneda: USDT │\n"
-        f"│ 📈 Disponible: {balance_formatted} │\n"
-        "├───────────────┤\n"
-        "│ ⏰ Consulta en tiempo real │\n"
-        "└───────────────┘"
+@dp.message(commands=["start"])
+async def start(message: Message):
+    bienvenida = (
+        "👋 *¡Bienvenido a ZafroBot!*\n\n"
+        "Este bot te ayuda a consultar tu saldo disponible de *USDT* en tu cuenta Spot de *BingX* en tiempo real.\n\n"
+        "Envía el comando /saldo para ver tu saldo actualizado."
     )
-    await message.answer(mensaje, parse_mode="Markdown")
+    await message.answer(bienvenida, parse_mode="Markdown")
 
-async def main():
-    try:
-        await dp.start_polling(bot)
-    finally:
-        await bot.session.close()
+@dp.message(commands=["saldo"])
+async def saldo(message: Message):
+    saldo_actual = await obtener_saldo_usdt()
+    respuesta = formatear_tarjeta(saldo_actual)
+    await message.answer(respuesta)
+
+async def on_startup(app):
+    await bot.set_webhook(WEBHOOK_URL)
+
+async def on_shutdown(app):
+    await bot.delete_webhook()
+
+# Configuración del servidor web
+async def handle_webhook(request):
+    body = await request.read()
+    update = types.Update(**json.loads(body))
+    await dp.feed_update(bot, update)
+    return web.Response()
+
+app = web.Application()
+app.router.add_post("/webhook", handle_webhook)
+app.on_startup.append(on_startup)
+app.on_shutdown.append(on_shutdown)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    logging.basicConfig(level=logging.INFO)
+    web.run_app(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
