@@ -70,13 +70,22 @@ def obtener_saldo_spot(api_key, secret_key):
     except Exception as e:
         return f"Error obteniendo saldo: {str(e)}"
 
-# Comando /start
+# Comando /start mejorado
 @dp.message(CommandStart())
 async def start_handler(message: Message):
     await message.answer("✅ Bot activo y recibiendo mensajes correctamente.")
+    
+    start_time = time.time()  # Tiempo antes de consultar
     saldo = obtener_saldo_spot(api_key, secret_key)
+    end_time = time.time()    # Tiempo después de consultar
+    elapsed_time = round(end_time - start_time, 2)  # Tiempo transcurrido
+    
     if isinstance(saldo, float):
-        await message.answer(f"💰 Saldo en Spot (USDT): {saldo:.2f} USDT")
+        await message.answer(
+            f"💰 Saldo en Spot (USDT): {saldo:.2f} USDT\n"
+            f"🕒 _Saldo actualizado hace {elapsed_time} segundos._",
+            parse_mode=ParseMode.MARKDOWN
+        )
     else:
         await message.answer(f"⚠️ {saldo}")
 
