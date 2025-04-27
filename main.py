@@ -1,149 +1,112 @@
+import os
 import asyncio
-import base64
-import hmac
-import time
-import hashlib
-import json
+import logging
 import requests
+from kucoin.client import Client
 from aiogram import Bot, Dispatcher, types
 from aiogram.enums import ParseMode
-from aiogram.client.default import DefaultBotProperties
-import os
+from dotenv import load_dotenv
 
-# Variables de entorno
-API_KEY = os.getenv("API_KEY")
-SECRET_KEY = os.getenv("SECRET_KEY")
-API_PASSPHRASE = os.getenv("API_PASSPHRASE")
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("CHAT_ID")
+# Cargar variables de entorno
+load_dotenv()
+
+API_KEY = os.getenv('API_KEY')
+API_SECRET = os.getenv('SECRET_KEY')
+API_PASS = os.getenv('API_PASS')
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+CHAT_ID = os.getenv('CHAT_ID')
+
+# Configurar el cliente de KuCoin
+client = Client(API_KEY, API_SECRET, API_PASS)
 
 # Inicializar bot de Telegram
-bot = Bot(
-    token=TELEGRAM_BOT_TOKEN,
-    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
-)
-dp = Dispatcher(bot=bot)
+bot = Bot(token=TELEGRAM_BOT_TOKEN, parse_mode=ParseMode.HTML)
+dp = Dispatcher()
 
-# Pares a escanear
-PAIRS = ["SEI-USDT", "ACH-USDT", "CVC-USDT"]
-
-# Parámetros de operación
-STOP_LOSS_PERCENT = 2
+# Parámetros de trading
+TRADING_PAIRS = ["SEI-USDT", "ACH-USDT", "SNT-USDT"]  # Pares seleccionados
+TRADE_AMOUNT = 15  # Monto en USDT por operación
 TAKE_PROFIT_PERCENT = 1.5
-OPERATING = False
+STOP_LOSS_PERCENT = 1.0
 
-# Función para enviar notificaciones
-async def notify(message):
-    await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
+async def send_telegram_message(message):
+    """Enviar mensaje al Telegram"""
+    await bot.send_message(chat_id=CHAT_ID, text=message)
 
-# Función para firmar solicitud
-def sign_request(endpoint, method="GET", body=""):
-    now = int(time.time() * 1000)
-    str_to_sign = str(now) + method + endpoint + body
-    signature = base64.b64encode(
-        hmac.new(SECRET_KEY.encode('utf-8'), str_to_sign.encode('utf-8'), hashlib.sha256).digest()
-    ).decode()
-    passphrase = base64.b64encode(
-        hmac.new(SECRET_KEY.encode('utf-8'), API_PASSPHRASE.encode('utf-8'), hashlib.sha256).digest()
-    ).decode()
-    headers = {
-        "KC-API-KEY": API_KEY,
-        "KC-API-SIGN": signature,
-        "KC-API-TIMESTAMP": str(now),
-        "KC-API-PASSPHRASE": passphrase,
-        "KC-API-KEY-VERSION": "2",
-        "Content-Type": "application/json"
-    }
-    return headers
-
-# Obtener balance en USDT
 async def get_balance():
-    url = "https://api.kucoin.com/api/v1/accounts"
-    headers = sign_request("/api/v1/accounts")
-    response = requests.get(url, headers=headers)
-    data = response.json()
-    for account in data["data"]:
-        if account["currency"] == "USDT" and account["type"] == "trade":
-            return float(account["available"])
+    """Obtener saldo disponible en USDT"""
+    balances = client.get_accounts()
+    for balance in balances:
+        if balance['currency'] == 'USDT' and balance['type'] == 'trade':
+            return float(balance['available'])
     return 0.0
 
-# Abrir operación
 async def open_trade(pair):
-    global OPERATING
+    """Abrir una operación de compra"""
     balance = await get_balance()
-    if balance < 5:
-        await notify("⚠️ No tienes saldo suficiente para operar.")
-        return
+    if balance < TRADE_AMOUNT:
+        await send_telegram_message("⚠️ Saldo insuficiente para operar.")
+        return None
 
-    url = f"https://api.kucoin.com/api/v1/market/orderbook/level1?symbol={pair}"
-    response = requests.get(url)
-    data = response.json()
-    price = float(data["data"]["price"])
-    quantity = round((balance * 0.98) / price, 6)
+    # Precio actual
+    ticker = client.get_ticker(pair)
+    price = float(ticker['price'])
 
-    endpoint = "/api/v1/orders"
-    url = "https://api.kucoin.com" + endpoint
-    order = {
-        "clientOid": str(int(time.time() * 1000)),
-        "side": "buy",
-        "symbol": pair,
-        "type": "market",
-        "funds": str(balance * 0.98)
-    }
-    headers = sign_request(endpoint, method="POST", body=json.dumps(order))
-    response = requests.post(url, headers=headers, json=order)
-    if response.status_code == 200:
-        OPERATING = True
-        await notify(f"✅ Compra realizada en {pair} a {price} USDT.\nCantidad: {quantity}")
-        await monitor_trade(pair, price, quantity)
-    else:
-        await notify("❌ Error al realizar compra.")
-        OPERATING = False
+    quantity = round(TRADE_AMOUNT / price, 4)
 
-# Monitorear y cerrar operación
-async def monitor_trade(pair, buy_price, quantity):
-    global OPERATING
-    while OPERATING:
-        url = f"https://api.kucoin.com/api/v1/market/orderbook/level1?symbol={pair}"
-        response = requests.get(url)
-        data = response.json()
-        current_price = float(data["data"]["price"])
+    try:
+        order = client.create_market_order(
+            symbol=pair,
+            side="buy",
+            size=quantity
+        )
+        await send_telegram_message(f"✅ Compra ejecutada: {quantity} {pair} a {price} USDT.")
+        return {"order_id": order['orderId'], "price": price, "quantity": quantity}
+    except Exception as e:
+        await send_telegram_message(f"❌ Error al comprar: {e}")
+        return None
 
-        profit_percent = ((current_price - buy_price) / buy_price) * 100
+async def close_trade(pair, quantity):
+    """Cerrar una operación de venta"""
+    try:
+        order = client.create_market_order(
+            symbol=pair,
+            side="sell",
+            size=quantity
+        )
+        await send_telegram_message(f"✅ Venta ejecutada de {quantity} {pair}.")
+    except Exception as e:
+        await send_telegram_message(f"❌ Error al vender: {e}")
 
-        if profit_percent >= TAKE_PROFIT_PERCENT or profit_percent <= -STOP_LOSS_PERCENT:
-            endpoint = "/api/v1/orders"
-            url = "https://api.kucoin.com" + endpoint
-            order = {
-                "clientOid": str(int(time.time() * 1000)),
-                "side": "sell",
-                "symbol": pair,
-                "type": "market",
-                "size": str(quantity)
-            }
-            headers = sign_request(endpoint, method="POST", body=json.dumps(order))
-            response = requests.post(url, headers=headers, json=order)
-            if response.status_code == 200:
-                await notify(f"✅ Venta realizada en {pair} a {current_price} USDT.")
-            else:
-                await notify("❌ Error al realizar venta.")
-            OPERATING = False
+async def monitor_trade(pair, entry_price, quantity):
+    """Monitorear operación abierta"""
+    while True:
+        ticker = client.get_ticker(pair)
+        current_price = float(ticker['price'])
+
+        if current_price >= entry_price * (1 + TAKE_PROFIT_PERCENT / 100):
+            await close_trade(pair, quantity)
+            break
+        elif current_price <= entry_price * (1 - STOP_LOSS_PERCENT / 100):
+            await close_trade(pair, quantity)
+            break
+
+        await asyncio.sleep(5)  # Esperar 5 segundos antes de volver a revisar
+
+async def trading_cycle():
+    """Ciclo de trading principal"""
+    while True:
+        for pair in TRADING_PAIRS:
+            trade = await open_trade(pair)
+            if trade:
+                await monitor_trade(pair, trade['price'], trade['quantity'])
         await asyncio.sleep(5)
 
-# Escaneo de mercado
-async def scan_market():
-    global OPERATING
-    while True:
-        if not OPERATING:
-            for pair in PAIRS:
-                await open_trade(pair)
-                await asyncio.sleep(2)
-        await asyncio.sleep(3)
-
-# Función principal
 async def main():
-    asyncio.create_task(scan_market())
-    await dp.start_polling()
+    """Inicializar el bot"""
+    logging.basicConfig(level=logging.INFO)
+    await send_telegram_message("🤖 ZafroBot Scalper PRO v1 iniciado.")
+    await trading_cycle()
 
 if __name__ == "__main__":
     asyncio.run(main())
