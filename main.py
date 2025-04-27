@@ -14,13 +14,14 @@ load_dotenv()
 
 API_KEY = os.getenv('API_KEY')
 API_SECRET = os.getenv('SECRET_KEY')
+PASSPHRASE = os.getenv('API_PASSPHRASE')
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 CHAT_ID = os.getenv('CHAT_ID')
 
 bot = Bot(token=TELEGRAM_BOT_TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher()
 
-trading_pairs = ["SEI-USDT", "CVC-USDT", "CUC-USDT"]
+trading_pairs = ["SEI-USDT", "CVC-USDT", "ACH-USDT"]
 TRADE_AMOUNT_PERCENTAGE = 0.80  # 80% del saldo disponible
 TAKE_PROFIT_PERCENTAGE = 0.015  # 1.5%
 STOP_LOSS_PERCENTAGE = 0.02     # 2%
@@ -45,7 +46,7 @@ async def kucoin_request(method, endpoint, params=None):
         "KC-API-KEY": API_KEY,
         "KC-API-SIGN": signature,
         "KC-API-TIMESTAMP": str(now),
-        "KC-API-PASSPHRASE": os.getenv('PASSPHRASE'),
+        "KC-API-PASSPHRASE": PASSPHRASE,
         "KC-API-KEY-VERSION": "2",
         "Content-Type": "application/json"
     }
@@ -86,7 +87,7 @@ async def open_trade(symbol):
     }
     await kucoin_request('POST', '/api/v1/orders', params=order)
 
-    await bot.send_message(CHAT_ID, f"✅ Compra realizada en {symbol}\nMonto: {trade_amount:.2f} USDT")
+    await bot.send_message(CHAT_ID, f"🟢 Compra realizada en {symbol}\n🔹 Monto usado: {trade_amount:.2f} USDT\n🔹 Precio de entrada: {price:.4f}")
 
     await manage_trade(symbol, price, quantity)
 
@@ -97,11 +98,11 @@ async def manage_trade(symbol, buy_price, quantity):
 
         if current_price >= buy_price * (1 + TAKE_PROFIT_PERCENTAGE):
             await sell_trade(symbol, quantity)
-            await bot.send_message(CHAT_ID, f"✅ Venta con GANANCIA en {symbol}\nPrecio: {current_price:.4f}")
+            await bot.send_message(CHAT_ID, f"✅ Venta con GANANCIA en {symbol}\n📈 Precio de salida: {current_price:.4f}\n➡️ Rentabilidad lograda: +1.5%")
             break
         elif current_price <= buy_price * (1 - STOP_LOSS_PERCENTAGE):
             await sell_trade(symbol, quantity)
-            await bot.send_message(CHAT_ID, f"⚠️ Venta con PÉRDIDA controlada en {symbol}\nPrecio: {current_price:.4f}")
+            await bot.send_message(CHAT_ID, f"⚠️ Venta con PÉRDIDA controlada en {symbol}\n📉 Precio de salida: {current_price:.4f}\n➡️ Pérdida limitada: -2%")
             break
 
         await asyncio.sleep(5)
@@ -117,7 +118,7 @@ async def sell_trade(symbol, quantity):
     await kucoin_request('POST', '/api/v1/orders', params=order)
 
 async def bot_main():
-    await bot.send_message(CHAT_ID, "🚀 ZafroBot Scalper PRO v1 iniciado y listo para operar en KuCoin.")
+    await bot.send_message(CHAT_ID, "🚀 ZafroBot Scalper PRO v1 iniciado en KuCoin.\n🔍 Escaneando oportunidades...")
 
     while True:
         await asyncio.sleep(TRADE_INTERVAL)
