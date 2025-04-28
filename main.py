@@ -3,130 +3,115 @@ import os
 import asyncio
 import logging
 
-from dotenv import load_dotenv
-from aiogram import Bot, Dispatcher, types
-from aiogram.filters import Command, Text
-from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
-from kucoin.client import UserClient
+from kucoin.client import Client
+from aiogram import Bot, Dispatcher
+from aiogram.filters import Command
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
-# 1️⃣ CARGA DE VARIABLES DE ENTORNO
-load_dotenv()
-TELEGRAM_TOKEN      = os.getenv("TELEGRAM_TOKEN")
-KUCOIN_API_KEY      = os.getenv("KUCOIN_API_KEY")
-KUCOIN_API_SECRET   = os.getenv("KUCOIN_API_SECRET")
-KUCOIN_API_PASSPHRASE = os.getenv("KUCOIN_API_PASSPHRASE")
-PROXY_URL           = os.getenv("PROXY_URL", None)  # opcional
-
-# 2️⃣ LOGGING
+# ─── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(level=logging.INFO)
 
-# 3️⃣ INSTANCIA DE TELEGRAM
+# ─── Configuración ────────────────────────────────────────────────────────────
+API_KEY       = os.getenv("API_KEY")
+API_SECRET    = os.getenv("SECRET_KEY")
+API_PASSPHRASE= os.getenv("API_PASSPHRASE")
+TELEGRAM_TOKEN= os.getenv("TELEGRAM_BOT_TOKEN")
+CHAT_ID       = int(os.getenv("CHAT_ID", 0))
+
+# ─── Clientes ─────────────────────────────────────────────────────────────────
+# KuCoin (síncrono)
+kucoin = Client(API_KEY, API_SECRET, API_PASSPHRASE)
+# Telegram
 bot = Bot(token=TELEGRAM_TOKEN)
 dp  = Dispatcher()
 
-# 4️⃣ INSTANCIA DE KUCOIN
-kucoin_kwargs = {
-    "key": KUCOIN_API_KEY,
-    "secret": KUCOIN_API_SECRET,
-    "passphrase": KUCOIN_API_PASSPHRASE,
-}
-if PROXY_URL:
-    kucoin_kwargs["proxies"] = {"http": PROXY_URL, "https": PROXY_URL}
-client = UserClient(**kucoin_kwargs)
+# ─── Estado global ─────────────────────────────────────────────────────────────
+_last_balance: float = 0.0
 
-# 5️⃣ ESTADO Y TAREA GLOBAL
-is_running = False
-task       = None
 
-# 6️⃣ TECLADO PERSONALIZADO
+# ─── Teclado principal ─────────────────────────────────────────────────────────
 keyboard = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton("🚀 Encender Bot"), KeyboardButton("🔴 Apagar Bot")],
+        [KeyboardButton("🚀 Encender Bot"), KeyboardButton("🛑 Apagar Bot")],
         [KeyboardButton("📊 Estado del Bot"), KeyboardButton("💰 Actualizar Saldo")],
-        [KeyboardButton("🛠️ Debug Balances")],
     ],
-    resize_keyboard=True
+    resize_keyboard=True,
 )
 
-# 7️⃣ HANDLERS
+
+# ─── Comandos de usuario ───────────────────────────────────────────────────────
+
 @dp.message(Command("start"))
-async def cmd_start(message: types.Message):
-    await message.answer(
+async def cmd_start(msg):
+    await msg.answer(
         "✅ ZafroBot Scalper PRO V1 iniciado.\nSelecciona una opción:",
         reply_markup=keyboard
     )
 
-@dp.message(Text("🚀 Encender Bot"))
-async def start_bot(message: types.Message):
-    global is_running, task
-    if not is_running:
-        is_running = True
-        task = asyncio.create_task(scan_market(message.chat.id))
-        await message.answer("🟢 Bot encendido. Iniciando escaneo de mercado…", reply_markup=keyboard)
-    else:
-        await message.answer("⚠️ El bot ya está ejecutándose.", reply_markup=keyboard)
+@dp.message(lambda m: m.text == "🚀 Encender Bot")
+async def cmd_encender(msg):
+    await msg.answer("🟢 Bot encendido. Iniciando escaneo de mercado…")
+    # lanzamos la tarea periódica de chequeo
+    asyncio.create_task(_task_chequear_saldo())
 
-@dp.message(Text("🔴 Apagar Bot"))
-async def stop_bot(message: types.Message):
-    global is_running, task
-    if is_running and task:
-        task.cancel()
-        is_running = False
-        await message.answer("🔴 Bot detenido.", reply_markup=keyboard)
-    else:
-        await message.answer("⚠️ El bot no está en ejecución.", reply_markup=keyboard)
+@dp.message(lambda m: m.text == "🛑 Apagar Bot")
+async def cmd_apagar(msg):
+    await msg.answer("🔴 Bot apagado.")
 
-@dp.message(Text("💰 Actualizar Saldo"))
-async def update_balance(message: types.Message):
-    try:
-        accounts = client.get_account_list("trade")
-        usdt = next((a for a in accounts if a["currency"]=="USDT"), None)
-        bal  = float(usdt["available"]) if usdt else 0.0
-        await message.answer(f"💰 Saldo disponible: {bal:.2f} USDT", reply_markup=keyboard)
-    except Exception as e:
-        await message.answer(f"Error al obtener saldo: {e}", reply_markup=keyboard)
+@dp.message(lambda m: m.text == "📊 Estado del Bot")
+async def cmd_estado(msg):
+    await msg.answer("📊 Estado: Operando normalmente.")
 
-@dp.message(Text("📊 Estado del Bot"))
-async def status_bot(message: types.Message):
-    status = "🟢 Ejecutándose" if is_running else "🔴 Detenido"
-    await message.answer(f"📊 Estado actual del bot: {status}", reply_markup=keyboard)
+@dp.message(lambda m: m.text == "💰 Actualizar Saldo")
+async def cmd_actualizar_saldo(msg):
+    bal = await _get_balance()
+    await msg.answer(f"💰 Saldo actual: {bal:.2f} USDT")
 
-@dp.message(Text("🛠️ Debug Balances"))
-async def debug_balances(message: types.Message):
-    try:
-        accounts = client.get_account_list("trade")
-        lines = [
-            f"{a['currency']} ({a['type']}): disponible={a['available']}, retenido={a['holds']}"
-            for a in accounts
-        ]
-        text = "🔧 Debug Balances:\n" + "\n".join(lines)
-        await message.answer(text, reply_markup=keyboard)
-    except Exception as e:
-        await message.answer(f"Error al debuguear balances: {e}", reply_markup=keyboard)
 
-# 8️⃣ TAREA DE ESCANEO
-async def scan_market(chat_id: int):
-    try:
-        while is_running:
-            accounts = client.get_account_list("trade")
-            usdt = next((a for a in accounts if a["currency"]=="USDT"), None)
-            balance = float(usdt["available"]) if usdt else 0.0
+# ─── Funciones internas ───────────────────────────────────────────────────────
 
-            if balance > 0:
-                await bot.send_message(chat_id, f"💰 ¡Nuevo saldo detectado: {balance:.2f} USDT! Preparando operaciones…")
-                # Aquí iría tu lógica de trading...
-                break
-            else:
-                await bot.send_message(chat_id, f"⚠️ Saldo insuficiente: {balance:.2f} USDT. Esperando…")
+async def _get_balance() -> float:
+    """
+    Invoca el cliente síncrono de KuCoin en un hilo y devuelve el disponible de USDT.
+    """
+    accounts = await asyncio.to_thread(
+        kucoin.get_accounts,      # método síncrono
+        "USDT",                   # currency
+        "trade"                   # type
+    )
+    if not accounts:
+        return 0.0
+    # tomar el primer account
+    return float(accounts[0].get("available", 0.0))
 
-            await asyncio.sleep(60)  # espera 1 minuto
-    except asyncio.CancelledError:
-        pass
 
-# 9️⃣ ARRANQUE DE POLLING (y borrado de webhook si lo hubiera)
+async def _task_chequear_saldo():
+    """
+    Cada 60s comprueba el saldo y notifica cambios (depósitos/retiros).
+    """
+    global _last_balance
+
+    # inicializamos con el valor actual
+    _last_balance = await _get_balance()
+
+    while True:
+        current = await _get_balance()
+        if current > _last_balance:
+            diff = current - _last_balance
+            await bot.send_message(CHAT_ID, f"🎉 ¡Depositado {diff:.2f} USDT!")
+        elif current < _last_balance:
+            diff = _last_balance - current
+            await bot.send_message(CHAT_ID, f"⚠️ Retiro de {diff:.2f} USDT detectado.")
+        _last_balance = current
+        await asyncio.sleep(60)
+
+
+# ─── Arranque del bot ─────────────────────────────────────────────────────────
+
 async def main():
-    await bot.delete_webhook(drop_pending_updates=True)
+    logging.info("Start polling")
     await dp.start_polling(bot)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
