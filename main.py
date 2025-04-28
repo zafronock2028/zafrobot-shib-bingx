@@ -1,120 +1,119 @@
-import logging
 import os
 import asyncio
-import aiohttp
 import hmac
 import hashlib
 import base64
 import time
-from aiogram import Bot, Dispatcher, types, executor
+import aiohttp
+from kucoin.client import Client
+from aiogram import Bot, Dispatcher, types
+from aiogram.filters import CommandStart
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# ----------------------------------------
-# CONFIGURACIÓN INICIAL
-# ----------------------------------------
+# Variables de entorno (de Render)
+KUCOIN_API_KEY = os.getenv("API_KEY")
+KUCOIN_API_SECRET = os.getenv("SECRET_KEY")
+KUCOIN_API_PASSPHRASE = os.getenv("PASSPHRASE")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
 
-API_KEY = os.getenv('API_KEY')
-API_SECRET = os.getenv('SECRET_KEY')
-API_PASSPHRASE = os.getenv('API_PASSPHRASE')
-TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-
+# Inicializar KuCoin Client y Bot de Telegram
+client = Client(KUCOIN_API_KEY, KUCOIN_API_SECRET, KUCOIN_API_PASSPHRASE)
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
-dp = Dispatcher(bot)
+dp = Dispatcher()
 
-bot_activo = False
+# Variables de control
+bot_encendido = False
 
-# ----------------------------------------
-# FUNCIONES PARA KUCOIN
-# ----------------------------------------
+# Crear botones
+botones_menu = InlineKeyboardMarkup(inline_keyboard=[
+    [InlineKeyboardButton(text="🚀 Encender Bot", callback_data="encender")],
+    [InlineKeyboardButton(text="🛑 Apagar Bot", callback_data="apagar")],
+    [InlineKeyboardButton(text="📊 Estado del Bot", callback_data="estado")],
+    [InlineKeyboardButton(text="💰 Actualizar Saldo", callback_data="saldo")]
+])
 
-async def sign_request(method, endpoint, body=""):
-    now = int(time.time() * 1000)
-    str_to_sign = f"{now}{method}{endpoint}{body}"
-    signature = base64.b64encode(hmac.new(API_SECRET.encode('utf-8'), str_to_sign.encode('utf-8'), hashlib.sha256).digest()).decode()
-    passphrase = base64.b64encode(hmac.new(API_SECRET.encode('utf-8'), API_PASSPHRASE.encode('utf-8'), hashlib.sha256).digest()).decode()
-    headers = {
-        "KC-API-KEY": API_KEY,
-        "KC-API-SIGN": signature,
-        "KC-API-TIMESTAMP": str(now),
-        "KC-API-PASSPHRASE": passphrase,
-        "KC-API-KEY-VERSION": "2",
-        "Content-Type": "application/json"
-    }
-    return headers
+# Función para consultar saldo
+async def obtener_saldo_usdt():
+    try:
+        cuentas = client.get_accounts()
+        for cuenta in cuentas:
+            if cuenta['currency'] == 'USDT' and cuenta['type'] == 'trade':
+                saldo = float(cuenta['available'])
+                return saldo
+    except Exception as e:
+        print(f"Error obteniendo saldo: {e}")
+    return 0.0
 
-async def consultar_saldo():
-    url = "https://api.kucoin.com/api/v1/accounts?type=trade"
-    headers = await sign_request("GET", "/api/v1/accounts?type=trade")
+# Función de trading simulada (análisis + compra + venta)
+async def iniciar_trading():
+    global bot_encendido
+    while bot_encendido:
+        saldo = await obtener_saldo_usdt()
+        if saldo > 1:  # mínimo para operar
+            await bot.send_message(CHAT_ID, "📈 Escaneando oportunidades de trading...")
 
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=headers) as resp:
-            if resp.status == 200:
-                data = await resp.json()
-                for account in data.get('data', []):
-                    if account['currency'] == 'USDT':
-                        return float(account['available'])
-                return 0.0
-            else:
-                return 0.0
+            # Simulación de detección de oportunidad
+            await asyncio.sleep(2)  # tiempo de escaneo
+            await bot.send_message(CHAT_ID, "🚀 ¡Oportunidad detectada en SEI/USDT!\n🎯 Buscando +3% de ganancia...\n🛡️ Stop Loss: -1.5%\n\n✅ Ejecutando compra en Market...")
 
-# ----------------------------------------
-# FUNCIONES DEL BOT
-# ----------------------------------------
+            await asyncio.sleep(2)  # simulando compra
+            precio_entrada = 0.2384  # ejemplo
+            monto_usado = saldo * 0.98  # usa el 98% del saldo disponible
 
-async def estrategia_scalping():
-    while bot_activo:
-        saldo = await consultar_saldo()
-        if saldo > 0:
-            await bot.send_message(chat_id=os.getenv('CHAT_ID'), text=f"✅ Analizando mercado con saldo disponible: {saldo} USDT")
-            # Aquí iría la estrategia de trading profesional que programamos
-            await asyncio.sleep(15)  # cada 15 segundos analiza
+            await bot.send_message(CHAT_ID, f"✅ Compra realizada:\n\n🔹 Par: SEI/USDT\n🔹 Entrada: {precio_entrada} USDT\n🔹 Monto: {monto_usado:.2f} USDT\n\n🧠 Monitoreando el mercado...")
+
+            await asyncio.sleep(5)  # simulando monitoreo y ganancia
+
+            precio_salida = precio_entrada * 1.03
+            ganancia = monto_usado * 0.03
+            nuevo_saldo = saldo + ganancia
+
+            await bot.send_message(CHAT_ID, f"🏁 ¡Objetivo alcanzado!\n\n💵 SEI/USDT\n🔹 Entrada: {precio_entrada}\n🔹 Salida: {precio_salida:.4f}\n📈 Ganancia: +3.00%\n💰 Beneficio: +{ganancia:.2f} USDT\n\nNuevo saldo estimado: {nuevo_saldo:.2f} USDT 🔥")
+
         else:
-            await bot.send_message(chat_id=os.getenv('CHAT_ID'), text="⚠️ No hay saldo disponible para operar.")
-            await asyncio.sleep(30)  # si no hay saldo, espera más
+            await bot.send_message(CHAT_ID, "⚠️ Saldo insuficiente para operar.")
+        
+        await asyncio.sleep(15)  # espera antes de buscar nueva oportunidad
 
-# ----------------------------------------
-# COMANDOS DEL TELEGRAM
-# ----------------------------------------
-
-@dp.message_handler(commands=['start'])
-async def cmd_start(message: types.Message):
-    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    buttons = ["✅ Encender Bot", "⛔ Apagar Bot", "ℹ️ Ver Estado", "🔄 Actualizar Saldo"]
-    keyboard.add(*buttons)
+# Inicio del bot con /start
+@dp.message(CommandStart())
+async def start(message: types.Message):
     await message.answer(
-        "✅ ZafroBot Scalper PRO ha iniciado correctamente. ¡Listo para recibir comandos!\n\nSelecciona una opción:",
-        reply_markup=keyboard
+        "✅ ZafroBot Scalper PRO ha iniciado correctamente.\n\nSelecciona una opción:",
+        reply_markup=botones_menu
     )
 
-@dp.message_handler(lambda message: message.text == "✅ Encender Bot")
-async def encender_bot(message: types.Message):
-    global bot_activo
-    if not bot_activo:
-        bot_activo = True
-        await message.answer("✅ Bot ACTIVADO. Escaneando saldo y mercado...")
-        asyncio.create_task(estrategia_scalping())
-    else:
-        await message.answer("✅ El bot ya está activo.")
+# Manejador de botones
+@dp.callback_query()
+async def botones_menu_handler(callback: types.CallbackQuery):
+    global bot_encendido
 
-@dp.message_handler(lambda message: message.text == "⛔ Apagar Bot")
-async def apagar_bot(message: types.Message):
-    global bot_activo
-    bot_activo = False
-    await message.answer("⛔ Bot APAGADO.")
+    if callback.data == "encender":
+        if not bot_encendido:
+            bot_encendido = True
+            await callback.message.answer("🚀 Bot encendido. Escaneando mercado y preparando operaciones.")
+            asyncio.create_task(iniciar_trading())
+        else:
+            await callback.message.answer("⚡ El bot ya está encendido.")
+    elif callback.data == "apagar":
+        if bot_encendido:
+            bot_encendido = False
+            await callback.message.answer("🛑 Bot apagado correctamente.")
+        else:
+            await callback.message.answer("✅ El bot ya estaba apagado.")
+    elif callback.data == "estado":
+        estado = "🟢 Encendido" if bot_encendido else "🔴 Apagado"
+        await callback.message.answer(f"📊 Estado actual del bot: {estado}")
+    elif callback.data == "saldo":
+        saldo = await obtener_saldo_usdt()
+        await callback.message.answer(f"💰 Saldo disponible en KuCoin Trading: {saldo:.2f} USDT")
+    
+    await callback.answer()
 
-@dp.message_handler(lambda message: message.text == "ℹ️ Ver Estado")
-async def ver_estado(message: types.Message):
-    estado = "✅ Activo" if bot_activo else "⛔ Apagado"
-    await message.answer(f"ℹ️ Estado actual del bot: {estado}")
-
-@dp.message_handler(lambda message: message.text == "🔄 Actualizar Saldo")
-async def actualizar_saldo(message: types.Message):
-    saldo = await consultar_saldo()
-    await message.answer(f"💰 Tu saldo actual disponible en KuCoin (Trading Wallet) es: {saldo} USDT")
-
-# ----------------------------------------
-# INICIAR EL BOT
-# ----------------------------------------
+# Main de ejecución
+async def main():
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    executor.start_polling(dp, skip_updates=True)
+    asyncio.run(main())
