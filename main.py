@@ -50,19 +50,21 @@ async def start_cmd(message: types.Message):
         reply_markup=menu
     )
 
-# Función para leer saldo USDT en Spot Trading
+# Función para leer saldo USDT (suma Spot main + trade)
 def leer_saldo_usdt() -> float:
     try:
         cuentas = client.get_accounts()
+        total = 0.0
         for c in cuentas:
-            if c.get("currency") == "USDT" and c.get("type") == "trade":
-                return float(c.get("available", 0))
+            if c.get("currency") == "USDT":
+                total += float(c.get("available", 0))
+        return total
     except Exception as e:
         logging.error(f"Error leyendo saldo: {e}")
     return 0.0
 
-# Tarea principal de escaneo de mercado
-async def tarea_principal(chat_id: int):
+# Tarea de escaneo de mercado
+defin async def tarea_principal(chat_id: int):
     global bot_encendido
     while bot_encendido:
         saldo = leer_saldo_usdt()
@@ -102,17 +104,15 @@ async def estado(message: types.Message):
     estado_text = "🟢 Encendido" if bot_encendido else "🔴 Apagado"
     await message.answer(f"📊 Estado actual del bot: {estado_text}")
 
-# Actualizar Saldo
+# Actualizar saldo
 @dp.message(lambda m: m.text == "💰 Actualizar Saldo")
 async def actualizar_saldo(message: types.Message):
     saldo = leer_saldo_usdt()
     await message.answer(f"💰 Saldo disponible: {saldo:.2f} USDT")
 
-# Punto de entrada
+# Entrada principal
 async def main():
-    # Eliminar webhook para evitar conflictos
     await bot.delete_webhook(drop_pending_updates=True)
-    # Iniciar polling
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
