@@ -108,7 +108,7 @@ async def actualizar_estadisticas(porcentaje_ganancia):
     historial_operaciones.append(porcentaje_ganancia)
     if len(historial_operaciones) > 50:
         historial_operaciones.pop(0)
-    entrenar_modelo()  # Entrena el modelo cada vez que termina una operación# ─── Funciones Internas ─────────────────────────────────────────────────────
+    entrenar_modelo()# ─── Funciones Internas ─────────────────────────────────────────────────────
 
 async def obtener_balance():
     cuenta = await asyncio.to_thread(kucoin.get_accounts, currency="USDT", type="trade")
@@ -148,7 +148,7 @@ def recolectar_datos_en_memoria(par, precio_open, precio_high, precio_low, preci
     if len(historico_en_memoria) > 500:
         historico_en_memoria.pop(0)
 
-# ─── Machine Learning para Entrenar y Predecir ───────────────────────────────
+# ─── Machine Learning: Entrenamiento y Predicción ───────────────────────────
 
 def entrenar_modelo():
     global modelo_predictor, historico_en_memoria
@@ -322,7 +322,8 @@ async def inicializar_volumenes():
         simbolo = par.replace("/", "-")
         try:
             ticker = await asyncio.to_thread(kucoin.get_ticker, symbol=simbolo)
-            volumen_anterior[par] = float(ticker['vol'])
+            volumen = float(ticker.get('volValue', 0))  # corregido: usamos volValue
+            volumen_anterior[par] = volumen
         except Exception as e:
             logging.error(f"Error inicializando volumen de {par}: {str(e)}")
             volumen_anterior[par] = 0.0
@@ -336,7 +337,7 @@ async def escanear_volumenes():
             for par in pares:
                 simbolo = par.replace("/", "-")
                 ticker = await asyncio.to_thread(kucoin.get_ticker, symbol=simbolo)
-                volumen_actual = float(ticker['vol'])
+                volumen_actual = float(ticker.get('volValue', 0))  # corregido aquí también
 
                 volumen_ant = volumen_anterior.get(par, 0.0)
                 if volumen_ant == 0.0:
