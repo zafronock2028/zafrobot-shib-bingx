@@ -12,32 +12,34 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 logging.basicConfig(level=logging.INFO)
 
 # ─── Configuración ────────────────────────────────────────────────────────────
-API_KEY       = os.getenv("API_KEY")
-API_SECRET    = os.getenv("SECRET_KEY")
-API_PASSPHRASE= os.getenv("API_PASSPHRASE")
-TELEGRAM_TOKEN= os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT_ID       = int(os.getenv("CHAT_ID", 0))
+API_KEY        = os.getenv("API_KEY")
+API_SECRET     = os.getenv("SECRET_KEY")
+API_PASSPHRASE = os.getenv("API_PASSPHRASE")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+CHAT_ID        = int(os.getenv("CHAT_ID", 0))
 
 # ─── Clientes ─────────────────────────────────────────────────────────────────
-# KuCoin (síncrono)
 kucoin = Client(API_KEY, API_SECRET, API_PASSPHRASE)
-# Telegram
-bot = Bot(token=TELEGRAM_TOKEN)
-dp  = Dispatcher()
+bot    = Bot(token=TELEGRAM_TOKEN)
+dp     = Dispatcher()
 
 # ─── Estado global ─────────────────────────────────────────────────────────────
 _last_balance: float = 0.0
 
-
 # ─── Teclado principal ─────────────────────────────────────────────────────────
 keyboard = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton("🚀 Encender Bot"), KeyboardButton("🛑 Apagar Bot")],
-        [KeyboardButton("📊 Estado del Bot"), KeyboardButton("💰 Actualizar Saldo")],
+        [
+            KeyboardButton(text="🚀 Encender Bot"),
+            KeyboardButton(text="🛑 Apagar Bot"),
+        ],
+        [
+            KeyboardButton(text="📊 Estado del Bot"),
+            KeyboardButton(text="💰 Actualizar Saldo"),
+        ],
     ],
     resize_keyboard=True,
 )
-
 
 # ─── Comandos de usuario ───────────────────────────────────────────────────────
 
@@ -51,7 +53,6 @@ async def cmd_start(msg):
 @dp.message(lambda m: m.text == "🚀 Encender Bot")
 async def cmd_encender(msg):
     await msg.answer("🟢 Bot encendido. Iniciando escaneo de mercado…")
-    # lanzamos la tarea periódica de chequeo
     asyncio.create_task(_task_chequear_saldo())
 
 @dp.message(lambda m: m.text == "🛑 Apagar Bot")
@@ -67,33 +68,17 @@ async def cmd_actualizar_saldo(msg):
     bal = await _get_balance()
     await msg.answer(f"💰 Saldo actual: {bal:.2f} USDT")
 
-
 # ─── Funciones internas ───────────────────────────────────────────────────────
 
 async def _get_balance() -> float:
-    """
-    Invoca el cliente síncrono de KuCoin en un hilo y devuelve el disponible de USDT.
-    """
-    accounts = await asyncio.to_thread(
-        kucoin.get_accounts,      # método síncrono
-        "USDT",                   # currency
-        "trade"                   # type
-    )
+    accounts = await asyncio.to_thread(kucoin.get_accounts, "USDT", "trade")
     if not accounts:
         return 0.0
-    # tomar el primer account
     return float(accounts[0].get("available", 0.0))
 
-
 async def _task_chequear_saldo():
-    """
-    Cada 60s comprueba el saldo y notifica cambios (depósitos/retiros).
-    """
     global _last_balance
-
-    # inicializamos con el valor actual
     _last_balance = await _get_balance()
-
     while True:
         current = await _get_balance()
         if current > _last_balance:
@@ -105,13 +90,11 @@ async def _task_chequear_saldo():
         _last_balance = current
         await asyncio.sleep(60)
 
-
 # ─── Arranque del bot ─────────────────────────────────────────────────────────
 
 async def main():
     logging.info("Start polling")
     await dp.start_polling(bot)
-
 
 if __name__ == "__main__":
     asyncio.run(main())
