@@ -1,3 +1,4 @@
+aiohttp
+aiogram
+kucoin-python
 python-dotenv
-aiogram==3.2
-kucoin-futures
