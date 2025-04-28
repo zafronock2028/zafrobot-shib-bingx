@@ -5,3 +5,4 @@ requests
 aiohttp
 pydantic
 websockets
+scikit-learn
