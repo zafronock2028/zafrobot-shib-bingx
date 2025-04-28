@@ -7,7 +7,7 @@ from aiogram.filters import Command
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from kucoin.client import Client
 
-# Carga de configuración de entorno
+# Cargar variables de entorno
 load_dotenv()
 API_KEY = os.getenv("API_KEY")
 SECRET_KEY = os.getenv("SECRET_KEY")
@@ -15,22 +15,20 @@ API_PASSPHRASE = os.getenv("API_PASSPHRASE")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
-# Inicializar cliente de KuCoin (Spot)
-client = Client(API_KEY, SECRET_KEY, API_PASSPHRASE)
-
-# Inicializar bot de Telegram y Dispatcher
-bot = Bot(token=TELEGRAM_BOT_TOKEN)
-dp = Dispatcher()
-
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
 
-# Variables globales de estado
+# Inicializar cliente de KuCoin (Spot) y bot de Telegram
+client = Client(API_KEY, SECRET_KEY, API_PASSPHRASE)
+bot = Bot(token=TELEGRAM_BOT_TOKEN)
+dp = Dispatcher()
+
+# Estado global del bot y tarea de escaneo
 bot_encendido = False
 scan_task = None
 
-# Definición del teclado personalizado
-keyboard = ReplyKeyboardMarkup(
+# Menú de Telegram
+menu = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🚀 Encender Bot"), KeyboardButton(text="🛑 Apagar Bot")],
         [KeyboardButton(text="📊 Estado del Bot"), KeyboardButton(text="💰 Actualizar Saldo")]
@@ -38,16 +36,17 @@ keyboard = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
+# Handler /start
 @dp.message(Command("start"))
-async def cmd_start(message: types.Message):
+async def start_cmd(message: types.Message):
     global bot_encendido
     bot_encendido = False
     await message.answer(
         "✅ ZafroBot Scalper PRO V1 iniciado.\nSelecciona una opción:",
-        reply_markup=keyboard
+        reply_markup=menu
     )
 
-# Función para leer el saldo USDT en Spot Trading
+# Leer saldo USDT en Spot Trading
 def leer_saldo_usdt() -> float:
     try:
         cuentas = client.get_accounts()
@@ -55,10 +54,11 @@ def leer_saldo_usdt() -> float:
             if c.get("currency") == "USDT" and c.get("type") == "trade":
                 return float(c.get("available", 0))
     except Exception as e:
-        logging.error(f"Error al leer saldo: {e}")
+        logging.error(f"Error leyendo saldo: {e}")
     return 0.0
 
-# Tarea principal de escaneo de mercado y notificaciones\async def tarea_principal(chat_id: int):
+# Tarea de escaneo de mercado
+t async def tarea_principal(chat_id: int):
     global bot_encendido
     while bot_encendido:
         saldo = leer_saldo_usdt()
@@ -68,8 +68,9 @@ def leer_saldo_usdt() -> float:
             await bot.send_message(chat_id, f"🔎 Escaneando mercado con {saldo:.2f} USDT disponibles…")
         await asyncio.sleep(30)
 
+# Encender el bot
 @dp.message(lambda m: m.text == "🚀 Encender Bot")
-async def encender_bot(message: types.Message):
+async def encender(message: types.Message):
     global bot_encendido, scan_task
     if not bot_encendido:
         bot_encendido = True
@@ -78,8 +79,9 @@ async def encender_bot(message: types.Message):
     else:
         await message.answer("⚠️ El bot ya está encendido.")
 
+# Apagar el bot
 @dp.message(lambda m: m.text == "🛑 Apagar Bot")
-async def apagar_bot(message: types.Message):
+async def apagar(message: types.Message):
     global bot_encendido, scan_task
     if bot_encendido:
         bot_encendido = False
@@ -90,20 +92,24 @@ async def apagar_bot(message: types.Message):
     else:
         await message.answer("⚠️ El bot ya está apagado.")
 
+# Estado del bot
 @dp.message(lambda m: m.text == "📊 Estado del Bot")
-async def estado_bot(message: types.Message):
+async def estado(message: types.Message):
     estado = "🟢 Encendido" if bot_encendido else "🔴 Apagado"
     await message.answer(f"📊 Estado actual del bot: {estado}")
 
+# Actualizar saldo
 @dp.message(lambda m: m.text == "💰 Actualizar Saldo")
 async def actualizar_saldo(message: types.Message):
     saldo = leer_saldo_usdt()
     await message.answer(f"💰 Saldo disponible: {saldo:.2f} USDT")
 
-# Punto de entrada\async def main():
-    # Eliminar cualquier webhook activo
+# Punto de entrada
+async def main():
+    # Eliminar webhook para evitar conflictos
     await bot.delete_webhook(drop_pending_updates=True)
-    # Iniciar el polling\await dp.start_polling(bot)
+    # Iniciar polling
+    await dp.start_polling(bot)
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     asyncio.run(main())
