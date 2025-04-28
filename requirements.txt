@@ -1,3 +1,5 @@
+python-kucoin
 python-dotenv
-aiogram==3.4.1
-kucoin-python==1.0.11
+requests
+aiohttp
+aiogram==3.2.0
