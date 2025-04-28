@@ -1,18 +1,19 @@
 services:
-  - type: web
-    name: zafrobot-notifier
+  - type: worker
+    name: zafrobot-scalper-pro-v1
     env: python
-    plan: free
-    buildCommand: ""
-    startCommand: "python main.py"
+    plan: starter
+    region: frankfurt
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
     envVars:
-      - key: TELEGRAM_BOT_TOKEN
-        value: 7768905391:AAGn5T2JiPe4RU_pmFWlhXc2Sn4OriV0CGM
       - key: API_KEY
-        value: LCRNrSVWUf1crSsLEEtrdDzyIUWdNVtelJTnypigJV9HQ1AfMYhkIxiNazKDNcrGq3vgQjuKspQTjFHeA
+        sync: false
       - key: SECRET_KEY
-        value: Kckg5g1hCDsE9N83n8wpxDjUWk0fGI7VWKVyKRX4wzHIgmi7dXj09B4NdA2MnKTCIw7MhtLV6YLHcemS3Yjg
+        sync: false
+      - key: API_PASSPHRASE
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
       - key: CHAT_ID
-        value: 295520
-    autoDeploy: true
-    healthCheckPath: /
+        sync: false
