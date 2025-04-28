@@ -8,15 +8,16 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from kucoin.client import Client
 
 # Cargar variables de entorno
-dotenv_path = os.getenv('DOTENV_PATH', '.env')
-load_dotenv(dotenv_path)
-
-# Configuración de API keys y tokens
+load_dotenv()
 API_KEY = os.getenv("API_KEY")
 SECRET_KEY = os.getenv("SECRET_KEY")
 API_PASSPHRASE = os.getenv("API_PASSPHRASE")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT_ID = int(os.getenv("CHAT_ID", 0))
+CHAT_ID = os.getenv("CHAT_ID")
+try:
+    CHAT_ID = int(CHAT_ID)
+except:
+    pass
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
@@ -31,7 +32,7 @@ bot_running = False
 scan_task = None
 
 # Teclado de opciones para Telegram
-menu = ReplyKeyboardMarkup(
+keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🚀 Encender Bot"), KeyboardButton(text="🛑 Apagar Bot")],
         [KeyboardButton(text="📊 Estado del Bot"), KeyboardButton(text="💰 Actualizar Saldo")]
@@ -39,14 +40,14 @@ menu = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
-# Handler para comando /start
+# Handler para /start
 @dp.message(Command("start"))
 async def start_cmd(message: types.Message):
     global bot_running
     bot_running = False
     await message.answer(
         "✅ ZafroBot Scalper PRO V1 iniciado.\nSelecciona una opción:",
-        reply_markup=menu
+        reply_markup=keyboard
     )
 
 # Función para obtener saldo USDT en Spot (suma disponible de todas las cuentas)
@@ -62,7 +63,8 @@ def get_usdt_balance() -> float:
         logging.error(f"Error obteniendo saldo: {e}")
         return 0.0
 
-# Tarea de escaneo de mercado\ nasync def market_scan(chat_id: int):
+# Tarea de escaneo de mercado
+async def market_scan(chat_id: int):
     global bot_running
     while bot_running:
         balance = get_usdt_balance()
@@ -108,13 +110,11 @@ async def update_balance(message: types.Message):
     balance = get_usdt_balance()
     await message.answer(f"💰 Saldo disponible: {balance:.2f} USDT")
 
-# Función principal
-async def main():
+# Función principal\ async def main():
     # Eliminar webhook previo para evitar conflictos
     await bot.delete_webhook(drop_pending_updates=True)
     # Iniciar polling del bot
     await dp.start_polling(bot)
 
-# Ejecutar el bot
-if __name__ == '__main__':
+if __name__ == "__main__":
     asyncio.run(main())
