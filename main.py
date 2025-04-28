@@ -1,72 +1,95 @@
+import logging
 import asyncio
-from aiogram import Bot, Dispatcher, types
-from aiogram.types import BotCommand
-from kucoin.client import Client
 import os
+from kucoin.client import AsyncClient
+from aiogram import Bot, Dispatcher, types
+from aiogram.filters import Command
+from aiogram.types import Message
+from dotenv import load_dotenv
 
+load_dotenv()
+
+# Configurar el registro de logs
+logging.basicConfig(level=logging.INFO)
+
+# Cargar variables de entorno
 API_KEY = os.getenv("API_KEY")
-API_SECRET = os.getenv("API_SECRET")
-API_PASSPHRASE = os.getenv("API_PASSPHRASE")
+SECRET_KEY = os.getenv("SECRET_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
+# Inicializar el bot y el dispatcher
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 dp = Dispatcher()
 
-client = Client(API_KEY, API_SECRET, API_PASSPHRASE)
+# Función para obtener saldo de USDT
+async def obtener_saldo_usdt():
+    client = await AsyncClient.create(API_KEY, SECRET_KEY)
+    accounts = await client.get_accounts()
+    saldo_usdt = 0.0
+    for account in accounts:
+        if account['currency'] == 'USDT' and account['type'] == 'trade':
+            saldo_usdt = float(account['available'])
+            break
+    await client.close()
+    return saldo_usdt
 
-bot_running = False
-
-async def set_commands():
-    commands = [
-        BotCommand(command="start", description="Iniciar el bot"),
-    ]
-    await bot.set_my_commands(commands)
-
-@dp.message(commands=['start'])
-async def cmd_start(message: types.Message):
-    await message.answer("✅ ZafroBot Scalper PRO ha iniciado correctamente.\n\nSelecciona una opción:", reply_markup=main_keyboard())
-
-@dp.message(lambda message: message.text == "🚀 Encender Bot")
-async def start_bot(message: types.Message):
-    global bot_running
-    bot_running = True
+# Función para encender el bot
+async def encender_bot(message: Message):
     await message.answer("🚀 Bot encendido. Escaneando mercado y preparando operaciones.")
-    asyncio.create_task(run_bot())
+    saldo = await obtener_saldo_usdt()
+    if saldo > 0:
+        await message.answer(f"✅ Saldo disponible para operar: {saldo} USDT")
+    else:
+        await message.answer("⚠️ Saldo insuficiente para operar. Saldo actual: 0.0 USDT")
 
-@dp.message(lambda message: message.text == "🛑 Apagar Bot")
-async def stop_bot(message: types.Message):
-    global bot_running
-    bot_running = False
-    await message.answer("🛑 Bot apagado. No se están ejecutando operaciones.")
+# Función para apagar el bot
+async def apagar_bot(message: Message):
+    await message.answer("⛔ Bot apagado. Operaciones detenidas.")
 
-@dp.message(lambda message: message.text == "📊 Estado del Bot")
-async def bot_status(message: types.Message):
-    status = "activo" if bot_running else "inactivo"
-    await message.answer(f"📈 Estado actual del bot: {status.upper()}")
+# Función para mostrar el estado del bot
+async def estado_bot(message: Message):
+    saldo = await obtener_saldo_usdt()
+    await message.answer(f"📊 Estado del bot:\nSaldo disponible: {saldo} USDT")
 
-@dp.message(lambda message: message.text == "💰 Actualizar Saldo")
-async def update_balance(message: types.Message):
-    try:
-        accounts = client.get_accounts()
-        usdt_balance = next((float(acc['available']) for acc in accounts if acc['currency'] == 'USDT' and acc['type'] == 'trade'), 0.0)
-        await message.answer(f"💵 Saldo disponible: {usdt_balance} USDT")
-    except Exception as e:
-        await message.answer(f"⚠️ Error al obtener saldo: {e}")
+# Función para actualizar saldo
+async def actualizar_saldo(message: Message):
+    saldo = await obtener_saldo_usdt()
+    await message.answer(f"💰 Saldo actualizado: {saldo} USDT")
 
-def main_keyboard():
-    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    keyboard.add("🚀 Encender Bot", "🛑 Apagar Bot")
-    keyboard.add("📊 Estado del Bot", "💰 Actualizar Saldo")
-    return keyboard
+# Configurar comandos de Telegram
+@dp.message(Command("start"))
+async def start_handler(message: Message):
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add(
+        types.KeyboardButton("🚀 Encender Bot"),
+        types.KeyboardButton("⛔ Apagar Bot"),
+    )
+    markup.add(
+        types.KeyboardButton("📊 Estado del Bot"),
+        types.KeyboardButton("💰 Actualizar Saldo"),
+    )
+    await message.answer(
+        "✅ *ZafroBot Scalper PRO* ha iniciado correctamente.\n\nSelecciona una opción:",
+        parse_mode="Markdown",
+        reply_markup=markup,
+    )
 
-async def run_bot():
-    global bot_running
-    while bot_running:
-        await asyncio.sleep(10)  # Aquí en el futuro irá el análisis de mercado y trading automático
+@dp.message()
+async def handle_message(message: Message):
+    if message.text == "🚀 Encender Bot":
+        await encender_bot(message)
+    elif message.text == "⛔ Apagar Bot":
+        await apagar_bot(message)
+    elif message.text == "📊 Estado del Bot":
+        await estado_bot(message)
+    elif message.text == "💰 Actualizar Saldo":
+        await actualizar_saldo(message)
+    else:
+        await message.answer("Comando no reconocido. Usa el menú.")
 
+# Función principal
 async def main():
-    await set_commands()
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
