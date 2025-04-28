@@ -13,20 +13,25 @@ API_KEY = os.getenv("API_KEY")
 SECRET_KEY = os.getenv("SECRET_KEY")
 API_PASSPHRASE = os.getenv("API_PASSPHRASE")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT_ID = int(os.getenv("CHAT_ID"))
+CHAT_ID = os.getenv("CHAT_ID")
+# Convertir CHAT_ID a entero si es posible
+try:
+    CHAT_ID = int(CHAT_ID)
+except:
+    pass
 
 # Configurar logging
-logging.basicConfig(level=logging.INFO)
+tlogging.basicConfig(level=logging.INFO)
 
-# Inicializar cliente de KuCoin (Spot) y bot de Telegram\client = Client(API_KEY, SECRET_KEY, API_PASSPHRASE)
+# Inicializar KuCoin Spot client y Telegram bot
+client = Client(API_KEY, SECRET_KEY, API_PASSPHRASE)
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 dp = Dispatcher()
 
-# Estado global del bot y tarea de escaneo
-bot_encendido = False
+# Estado globalot_encendido = False
 scan_task = None
 
-# Menú de opciones de Telegram
+# Teclado de menú
 menu = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🚀 Encender Bot"), KeyboardButton(text="🛑 Apagar Bot")],
@@ -35,7 +40,7 @@ menu = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
-# Handler para /start
+# /start handler
 @dp.message(Command("start"))
 async def start_cmd(message: types.Message):
     global bot_encendido
@@ -45,7 +50,7 @@ async def start_cmd(message: types.Message):
         reply_markup=menu
     )
 
-# Función para leer saldo USDT en Spot Trading
+# Función para leer saldo USDT Spot
 def leer_saldo_usdt() -> float:
     try:
         cuentas = client.get_accounts()
@@ -56,7 +61,8 @@ def leer_saldo_usdt() -> float:
         logging.error(f"Error leyendo saldo: {e}")
     return 0.0
 
-# Tarea principal de escaneo de mercado\async def tarea_principal(chat_id: int):
+# Tarea principal de escaneo de mercado
+async def tarea_principal(chat_id: int):
     global bot_encendido
     while bot_encendido:
         saldo = leer_saldo_usdt()
@@ -66,7 +72,7 @@ def leer_saldo_usdt() -> float:
             await bot.send_message(chat_id, f"🔎 Escaneando mercado con {saldo:.2f} USDT disponibles…")
         await asyncio.sleep(30)
 
-# Encender el bot
+# Encender Bot
 @dp.message(lambda m: m.text == "🚀 Encender Bot")
 async def encender(message: types.Message):
     global bot_encendido, scan_task
@@ -77,7 +83,7 @@ async def encender(message: types.Message):
     else:
         await message.answer("⚠️ El bot ya está encendido.")
 
-# Apagar el bot
+# Apagar Bot
 @dp.message(lambda m: m.text == "🛑 Apagar Bot")
 async def apagar(message: types.Message):
     global bot_encendido, scan_task
@@ -90,19 +96,20 @@ async def apagar(message: types.Message):
     else:
         await message.answer("⚠️ El bot ya está apagado.")
 
-# Estado del bot
+# Estado del Bot
 @dp.message(lambda m: m.text == "📊 Estado del Bot")
 async def estado(message: types.Message):
     estado_text = "🟢 Encendido" if bot_encendido else "🔴 Apagado"
     await message.answer(f"📊 Estado actual del bot: {estado_text}")
 
-# Actualizar saldo
+# Actualizar Saldo
 @dp.message(lambda m: m.text == "💰 Actualizar Saldo")
 async def actualizar_saldo(message: types.Message):
     saldo = leer_saldo_usdt()
     await message.answer(f"💰 Saldo disponible: {saldo:.2f} USDT")
 
-# Punto de entrada\async def main():
+# Entrypoint
+async def main():
     # Eliminar webhook para evitar conflictos
     await bot.delete_webhook(drop_pending_updates=True)
     # Iniciar polling
