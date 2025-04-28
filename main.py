@@ -1,135 +1,120 @@
+import logging
+import os
 import asyncio
 import aiohttp
 import hmac
 import hashlib
+import base64
 import time
-import random
-import os
-from aiogram import Bot, Dispatcher, types
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from dotenv import load_dotenv
+from aiogram import Bot, Dispatcher, types, executor
 
-load_dotenv()
+# ----------------------------------------
+# CONFIGURACIÓN INICIAL
+# ----------------------------------------
 
 API_KEY = os.getenv('API_KEY')
-API_SECRET = os.getenv('API_SECRET')
-PASSPHRASE = os.getenv('PASSPHRASE')
+API_SECRET = os.getenv('SECRET_KEY')
+API_PASSPHRASE = os.getenv('API_PASSPHRASE')
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-CHAT_ID = os.getenv('CHAT_ID')
 
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
-dp = Dispatcher()
+dp = Dispatcher(bot)
 
-# Estado del bot
-bot_active = False
+bot_activo = False
 
-# Plantilla de mensajes de victoria
-VICTORY_MESSAGES = [
-    "🏆 ¡Victoria asegurada, seguimos sumando!",
-    "🚀 ¡Otra ganancia más para Zafronock!",
-    "💎 ¡Rentabilidad desbloqueada!",
-    "🔥 ¡Sigamos rompiendo el mercado!",
-    "⚡ ¡Operación cerrada con éxito!",
-    "📈 ¡Subimos un escalón más!",
-    "🥇 ¡Rentabilidad alcanzada como un campeón!",
-    "🤑 ¡Dinero ganado, dinero trabajando!"
-]
+# ----------------------------------------
+# FUNCIONES PARA KUCOIN
+# ----------------------------------------
 
-# Función para firmar las solicitudes a KuCoin
-def sign_request(endpoint, params):
-    now = str(int(time.time() * 1000))
-    str_to_sign = now + 'GET' + endpoint + params
-    signature = hmac.new(API_SECRET.encode('utf-8'), str_to_sign.encode('utf-8'), hashlib.sha256).digest()
-    signature_b64 = signature.hex()
-    return now, signature_b64
-
-# Función para obtener el saldo de la cuenta principal de trading en KuCoin
-async def get_account_balance():
-    endpoint = "/api/v1/accounts"
-    params = "?currency=USDT&type=trade"
-    url = "https://api.kucoin.com" + endpoint + params
-
-    now, signature = sign_request(endpoint, params)
+async def sign_request(method, endpoint, body=""):
+    now = int(time.time() * 1000)
+    str_to_sign = f"{now}{method}{endpoint}{body}"
+    signature = base64.b64encode(hmac.new(API_SECRET.encode('utf-8'), str_to_sign.encode('utf-8'), hashlib.sha256).digest()).decode()
+    passphrase = base64.b64encode(hmac.new(API_SECRET.encode('utf-8'), API_PASSPHRASE.encode('utf-8'), hashlib.sha256).digest()).decode()
     headers = {
         "KC-API-KEY": API_KEY,
         "KC-API-SIGN": signature,
-        "KC-API-TIMESTAMP": now,
-        "KC-API-PASSPHRASE": PASSPHRASE,
-        "KC-API-KEY-VERSION": "2"
+        "KC-API-TIMESTAMP": str(now),
+        "KC-API-PASSPHRASE": passphrase,
+        "KC-API-KEY-VERSION": "2",
+        "Content-Type": "application/json"
     }
+    return headers
+
+async def consultar_saldo():
+    url = "https://api.kucoin.com/api/v1/accounts?type=trade"
+    headers = await sign_request("GET", "/api/v1/accounts?type=trade")
 
     async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=headers) as response:
-            if response.status != 200:
-                return None
-            data = await response.json()
-            if data.get("code") == "200000" and data.get("data"):
-                return float(data["data"]["available"])
+        async with session.get(url, headers=headers) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                for account in data.get('data', []):
+                    if account['currency'] == 'USDT':
+                        return float(account['available'])
+                return 0.0
             else:
-                return None
+                return 0.0
 
-# Función para construir el teclado principal
-def main_menu():
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Encender Bot", callback_data="encender")],
-        [InlineKeyboardButton(text="⛔ Apagar Bot", callback_data="apagar")],
-        [InlineKeyboardButton(text="ℹ️ Estado", callback_data="estado")],
-        [InlineKeyboardButton(text="💰 Actualizar Saldo", callback_data="actualizar_saldo")],
-    ])
-    return keyboard
+# ----------------------------------------
+# FUNCIONES DEL BOT
+# ----------------------------------------
 
-@dp.message(commands=["start"])
-async def start_command(message: types.Message):
+async def estrategia_scalping():
+    while bot_activo:
+        saldo = await consultar_saldo()
+        if saldo > 0:
+            await bot.send_message(chat_id=os.getenv('CHAT_ID'), text=f"✅ Analizando mercado con saldo disponible: {saldo} USDT")
+            # Aquí iría la estrategia de trading profesional que programamos
+            await asyncio.sleep(15)  # cada 15 segundos analiza
+        else:
+            await bot.send_message(chat_id=os.getenv('CHAT_ID'), text="⚠️ No hay saldo disponible para operar.")
+            await asyncio.sleep(30)  # si no hay saldo, espera más
+
+# ----------------------------------------
+# COMANDOS DEL TELEGRAM
+# ----------------------------------------
+
+@dp.message_handler(commands=['start'])
+async def cmd_start(message: types.Message):
+    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    buttons = ["✅ Encender Bot", "⛔ Apagar Bot", "ℹ️ Ver Estado", "🔄 Actualizar Saldo"]
+    keyboard.add(*buttons)
     await message.answer(
-        "✅ Bienvenido a ZafroBot Scalper PRO\n"
-        "Listo para operar de forma profesional en KuCoin.\n\n"
-        "📊 Opciones disponibles:",
-        reply_markup=main_menu()
-    )
-    await message.answer(
-        "🔹 ZafroBot Scalper PRO v1.0 - By @Zafronockbitfratsg"
+        "✅ ZafroBot Scalper PRO ha iniciado correctamente. ¡Listo para recibir comandos!\n\nSelecciona una opción:",
+        reply_markup=keyboard
     )
 
-@dp.callback_query()
-async def handle_buttons(callback_query: types.CallbackQuery):
-    global bot_active
+@dp.message_handler(lambda message: message.text == "✅ Encender Bot")
+async def encender_bot(message: types.Message):
+    global bot_activo
+    if not bot_activo:
+        bot_activo = True
+        await message.answer("✅ Bot ACTIVADO. Escaneando saldo y mercado...")
+        asyncio.create_task(estrategia_scalping())
+    else:
+        await message.answer("✅ El bot ya está activo.")
 
-    if callback_query.data == "encender":
-        if not bot_active:
-            bot_active = True
-            await callback_query.message.answer("✅ Bot encendido. Escaneando saldo y mercado...")
-            asyncio.create_task(trading_loop())
-        else:
-            await callback_query.message.answer("⚡ El bot ya está encendido.")
-    elif callback_query.data == "apagar":
-        if bot_active:
-            bot_active = False
-            await callback_query.message.answer("⛔ Bot apagado. Se detienen las operaciones.")
-        else:
-            await callback_query.message.answer("⚡ El bot ya está apagado.")
-    elif callback_query.data == "estado":
-        status = "✅ El bot está actualmente encendido." if bot_active else "⛔ El bot está actualmente apagado."
-        await callback_query.message.answer(status)
-    elif callback_query.data == "actualizar_saldo":
-        balance = await get_account_balance()
-        if balance is not None:
-            await callback_query.message.answer(f"💵 Saldo disponible en Spot: {balance:.2f} USDT")
-        else:
-            await callback_query.message.answer("⚠️ No se pudo obtener el saldo. Verifica tu conexión o tu cuenta.")
+@dp.message_handler(lambda message: message.text == "⛔ Apagar Bot")
+async def apagar_bot(message: types.Message):
+    global bot_activo
+    bot_activo = False
+    await message.answer("⛔ Bot APAGADO.")
 
-async def trading_loop():
-    while bot_active:
-        # Aquí irá la lógica de trading en producción (por ahora placeholder)
-        await asyncio.sleep(5)  # Simulamos escaneo del mercado cada 5 segundos
-        # Aquí puedes agregar la simulación de envío de mensajes de victoria
-        # await bot.send_message(chat_id=CHAT_ID, text=random.choice(VICTORY_MESSAGES))
-        pass
+@dp.message_handler(lambda message: message.text == "ℹ️ Ver Estado")
+async def ver_estado(message: types.Message):
+    estado = "✅ Activo" if bot_activo else "⛔ Apagado"
+    await message.answer(f"ℹ️ Estado actual del bot: {estado}")
 
-async def main():
-    try:
-        await dp.start_polling(bot)
-    finally:
-        await bot.session.close()
+@dp.message_handler(lambda message: message.text == "🔄 Actualizar Saldo")
+async def actualizar_saldo(message: types.Message):
+    saldo = await consultar_saldo()
+    await message.answer(f"💰 Tu saldo actual disponible en KuCoin (Trading Wallet) es: {saldo} USDT")
+
+# ----------------------------------------
+# INICIAR EL BOT
+# ----------------------------------------
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    logging.basicConfig(level=logging.INFO)
+    executor.start_polling(dp, skip_updates=True)
