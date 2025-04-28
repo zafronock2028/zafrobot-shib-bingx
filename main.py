@@ -1,42 +1,45 @@
-import os
 import asyncio
+import time
 import aiohttp
 import hmac
 import hashlib
 import base64
-import time
+import json
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# Variables de entorno
-API_KEY = os.getenv('API_KEY')
-API_SECRET = os.getenv('SECRET_KEY')
-API_PASSPHRASE = os.getenv('PHRASE')  # Clave de la trading password
-TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-CHAT_ID = int(os.getenv('CHAT_ID'))
+# --- TUS VARIABLES ---
+import os
 
-# Inicializar bot y dispatcher
+API_KEY = os.getenv("API_KEY")
+API_SECRET = os.getenv("API_SECRET")
+PASSPHRASE = os.getenv("PASSPHRASE")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
+WEBHOOK = os.getenv("WEBHOOK")
+
+# --- CONFIGURACIÓN DEL BOT ---
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 dp = Dispatcher()
 
-# Estado global del bot
+# Estado del bot (Encendido/Apagado)
 bot_activo = False
 
-# Crear teclado de control
-keyboard = InlineKeyboardMarkup(inline_keyboard=[
-    [InlineKeyboardButton(text="✅ Encender Bot", callback_data="encender")],
-    [InlineKeyboardButton(text="⛔ Apagar Bot", callback_data="apagar")],
-    [InlineKeyboardButton(text="ℹ️ Ver Estado", callback_data="estado")],
-    [InlineKeyboardButton(text="🔄 Actualizar Saldo", callback_data="saldo")]
-])
+# URL de KuCoin para consulta de saldo
+KUCOIN_BALANCE_URL = "https://api.kucoin.com/api/v1/accounts"
 
-# Función para firmar solicitudes KuCoin
-def sign_request(endpoint, method='GET', body=''):
+# --- FUNCIONES AUXILIARES ---
+async def consultar_saldo_kucoin():
     now = int(time.time() * 1000)
-    str_to_sign = str(now) + method + endpoint + body
-    signature = base64.b64encode(hmac.new(API_SECRET.encode('utf-8'), str_to_sign.encode('utf-8'), hashlib.sha256).digest())
-    passphrase = base64.b64encode(hmac.new(API_SECRET.encode('utf-8'), API_PASSPHRASE.encode('utf-8'), hashlib.sha256).digest())
+    str_to_sign = str(now) + 'GET' + '/api/v1/accounts'
+    signature = base64.b64encode(
+        hmac.new(API_SECRET.encode('utf-8'), str_to_sign.encode('utf-8'), hashlib.sha256).digest()
+    )
+    passphrase = base64.b64encode(
+        hmac.new(API_SECRET.encode('utf-8'), PASSPHRASE.encode('utf-8'), hashlib.sha256).digest()
+    )
+
     headers = {
         "KC-API-KEY": API_KEY,
         "KC-API-SIGN": signature.decode(),
@@ -45,76 +48,79 @@ def sign_request(endpoint, method='GET', body=''):
         "KC-API-KEY-VERSION": "2",
         "Content-Type": "application/json"
     }
-    return headers
 
-# Comando de inicio
-@dp.message(Command(commands=["start"]))
-async def start_command(message: types.Message):
-    if message.chat.id != CHAT_ID:
-        return
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(KUCOIN_BALANCE_URL, headers=headers) as resp:
+                response = await resp.json()
+                if resp.status == 200 and response.get("code") == "200000":
+                    for account in response["data"]:
+                        if account["currency"] == "USDT" and account["type"] == "trade":
+                            return float(account["available"])
+        except Exception as e:
+            print(f"Error al consultar saldo: {e}")
+    return None
+
+def get_keyboard():
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Encender Bot", callback_data="encender")],
+        [InlineKeyboardButton(text="⛔ Apagar Bot", callback_data="apagar")],
+        [InlineKeyboardButton(text="ℹ️ Ver Estado", callback_data="estado")],
+        [InlineKeyboardButton(text="🔄 Actualizar Saldo", callback_data="saldo")]
+    ])
+    return keyboard
+
+# --- HANDLERS ---
+@dp.message(Command("start"))
+async def start(message: types.Message):
     await message.answer(
-        "🚀 ¡Bienvenido a ZafroBot Scalper PRO v1!\n\n"
-        "Usa los botones para controlar el bot:\n\n"
-        "✅ Encender Bot\n"
-        "⛔ Apagar Bot\n"
-        "ℹ️ Ver Estado\n"
-        "🔄 Actualizar Saldo\n\n"
-        "🔥 ¡Vamos por todo, Zafronock!",
-        reply_markup=keyboard
+        "**Bienvenido a ZafroBot Scalper PRO v1**\n\nSelecciona una opción:",
+        reply_markup=get_keyboard(),
+        parse_mode="Markdown"
     )
 
-# Función para consultar saldo disponible en Trading Wallet
-async def consultar_saldo():
-    url = "https://api.kucoin.com/api/v1/accounts?type=trade"
-    headers = sign_request("/api/v1/accounts?type=trade")
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=headers) as resp:
-            data = await resp.json()
-            usdt_balance = next((item for item in data['data'] if item['currency'] == 'USDT'), None)
-            if usdt_balance:
-                return float(usdt_balance['available'])
-            return 0.0
-
-# Función para mandar el estado actual
-async def estado_actual(message: types.Message):
-    saldo = await consultar_saldo()
-    await message.answer(f"💰 Saldo disponible en Wallet de Trading: {saldo:.2f} USDT")
-
-# Botón de acciones
-@dp.callback_query()
-async def botones_control(callback: types.CallbackQuery):
+@dp.callback_query(lambda c: c.data == "encender")
+async def encender_bot(callback_query: types.CallbackQuery):
     global bot_activo
+    bot_activo = True
+    await callback_query.message.answer("✅ ZafroBot Scalper PRO ACTIVADO. ¡A ganar!")
+    saldo = await consultar_saldo_kucoin()
+    if saldo is not None:
+        await callback_query.message.answer(
+            f"⚡ Recarga detectada.\nSaldo disponible: **{saldo:.2f} USDT**\n✅ Bot listo para operar.",
+            parse_mode="Markdown"
+        )
+    else:
+        await callback_query.message.answer(
+            "⚠️ No se detectó saldo disponible.\nEl bot permanecerá en espera."
+        )
 
-    if callback.message.chat.id != CHAT_ID:
-        return
-
-    if callback.data == "encender":
-        bot_activo = True
-        await callback.message.answer("✅ ZafroBot Scalper PRO está ahora ACTIVADO.")
-    elif callback.data == "apagar":
-        bot_activo = False
-        await callback.message.answer("⛔ ZafroBot Scalper PRO ha sido APAGADO.")
-    elif callback.data == "estado":
-        await estado_actual(callback.message)
-    elif callback.data == "saldo":
-        saldo = await consultar_saldo()
-        await callback.message.answer(f"🔄 Saldo actualizado: {saldo:.2f} USDT")
-
-    await callback.answer()
-
-# Ciclo de análisis continuo
-async def ciclo_bot():
+@dp.callback_query(lambda c: c.data == "apagar")
+async def apagar_bot(callback_query: types.CallbackQuery):
     global bot_activo
-    while True:
-        if bot_activo:
-            # Aquí va el análisis real que estamos por integrar (scalping, volumen, impulso, etc.)
-            await asyncio.sleep(10)  # Simulación de análisis de mercado cada 10s
-        else:
-            await asyncio.sleep(5)
+    bot_activo = False
+    await callback_query.message.answer("⛔ ZafroBot Scalper PRO apagado. En pausa.")
 
-# Lanzar bot
+@dp.callback_query(lambda c: c.data == "estado")
+async def estado_bot(callback_query: types.CallbackQuery):
+    estado = "✅ Bot Activo" if bot_activo else "⛔ Bot en Pausa"
+    await callback_query.message.answer(estado)
+
+@dp.callback_query(lambda c: c.data == "saldo")
+async def actualizar_saldo(callback_query: types.CallbackQuery):
+    saldo = await consultar_saldo_kucoin()
+    if saldo is not None:
+        await callback_query.message.answer(
+            f"🔄 Saldo actualizado:\n**{saldo:.2f} USDT** disponibles en Trading Wallet.",
+            parse_mode="Markdown"
+        )
+    else:
+        await callback_query.message.answer(
+            "⚠️ No se pudo consultar el saldo."
+        )
+
 async def main():
-    asyncio.create_task(ciclo_bot())
+    await bot.send_message(CHAT_ID, "✅ ZafroBot Scalper PRO ha iniciado correctamente. Listo para recibir comandos.")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
