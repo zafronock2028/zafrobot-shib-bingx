@@ -1,56 +1,63 @@
+```python
 import os
 import asyncio
 import logging
-
+from kucoin.client import Client
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
-from kucoin.client import Client
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from dotenv import load_dotenv
 
-# Carga de variables de entorno
-load_dotenv()
-API_KEY           = os.getenv("API_KEY")
-SECRET_KEY        = os.getenv("SECRET_KEY")
-API_PASSPHRASE    = os.getenv("API_PASSPHRASE")
-TELEGRAM_BOT_TOKEN= os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT_ID           = os.getenv("CHAT_ID")  # Asegúrate de que sea string
+# Cargar variables de entorno
+dotenv_path = os.getenv('DOTENV_PATH', '.env')
+load_dotenv(dotenv_path)
+
+# Configuración API KuCoin\API_KEY = os.getenv("API_KEY")
+SECRET_KEY = os.getenv("SECRET_KEY")
+API_PASSPHRASE = os.getenv("API_PASSPHRASE")
+
+# Configuración Bot Telegram
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
 
 # Cliente KuCoin (Spot)
 client = Client(API_KEY, SECRET_KEY, API_PASSPHRASE)
 
-# Bot de Telegram
+# Inicializar Bot y Dispatcher
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
-dp  = Dispatcher()
+dp = Dispatcher()
 
-# Estado interno
+# Estado interno del bot
 bot_encendido = False
 
-# Teclado
-keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
-keyboard.add(KeyboardButton("🚀 Encender Bot"), KeyboardButton("🛑 Apagar Bot"))
-keyboard.add(KeyboardButton("📊 Estado del Bot"), KeyboardButton("💰 Actualizar Saldo"))
+# Teclado de opciones (ReplyKeyboardMarkup requiere el campo 'keyboard')
+keyboard = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="🚀 Encender Bot"), KeyboardButton(text="🛑 Apagar Bot")],
+        [KeyboardButton(text="📊 Estado del Bot"), KeyboardButton(text="💰 Actualizar Saldo")]
+    ],
+    resize_keyboard=True
+)
 
-# Comando /start
-@dp.message(Command("start"))
-async def cmd_start(message: Message):
+# Comando /start\@dp.message(Command("start"))
+async def cmd_start(message: types.Message):
     await message.answer(
-        "✅ *ZafroBot Scalper PRO* está online.\n\nSelecciona una opción:",
+        "✅ *ZafroBot Scalper PRO ha iniciado correctamente.*\n\nSelecciona una opción:",
         parse_mode="Markdown",
         reply_markup=keyboard
     )
 
-# Función para leer saldo USDT en Spot Trading
+# Leer saldo USDT en Spot Trading
 def leer_saldo_usdt() -> float:
     cuentas = client.get_accounts()
-    for c in cuentas:
-        if c["currency"]=="USDT" and c["type"]=="trade":
-            return float(c["available"])
+    for cuenta in cuentas:
+        if cuenta.get("currency") == "USDT" and cuenta.get("type") == "trade":
+            return float(cuenta.get("available", 0))
     return 0.0
 
-# Encender bot
-@dp.message(lambda m: m.text=="🚀 Encender Bot")
-async def encender(message: Message):
+# Encender el bot
+@dp.message(lambda m: m.text == "🚀 Encender Bot")
+async def encender_bot(message: types.Message):
     global bot_encendido
     if not bot_encendido:
         bot_encendido = True
@@ -59,44 +66,41 @@ async def encender(message: Message):
     else:
         await message.answer("⚠️ El bot ya está encendido.")
 
-# Apagar bot
-@dp.message(lambda m: m.text=="🛑 Apagar Bot")
-async def apagar(message: Message):
+# Apagar el bot
+@dp.message(lambda m: m.text == "🛑 Apagar Bot")
+async def apagar_bot(message: types.Message):
     global bot_encendido
     bot_encendido = False
     await message.answer("🔴 Bot apagado. Operaciones detenidas.")
 
 # Estado del bot
-@dp.message(lambda m: m.text=="📊 Estado del Bot")
-async def estado(message: Message):
-    estado_text = "🟢 Encendido" if bot_encendido else "🔴 Apagado"
-    await message.answer(f"📊 Estado actual del bot: *{estado_text}*", parse_mode="Markdown")
+@dp.message(lambda m: m.text == "📊 Estado del Bot")
+async def estado_bot(message: types.Message):
+    estado = "🟢 Encendido" if bot_encendido else "🔴 Apagado"
+    await message.answer(f"📊 Estado actual del bot: *{estado}*", parse_mode="Markdown")
 
-# Actualizar saldo
-@dp.message(lambda m: m.text=="💰 Actualizar Saldo")
-async def actualizar_saldo(message: Message):
+# Actualizar saldo\@dp.message(lambda m: m.text == "💰 Actualizar Saldo")
+async def actualizar_saldo(message: types.Message):
     saldo = leer_saldo_usdt()
     await message.answer(f"💰 Saldo disponible en Spot: *{saldo:.2f} USDT*", parse_mode="Markdown")
 
-# Tarea principal (escaneo y operaciones)
+# Tarea principal de escaneo y trading
 async def tarea_principal():
     while bot_encendido:
         saldo = leer_saldo_usdt()
-        if saldo < 10:
-            await bot.send_message(CHAT_ID, f"⚠️ Saldo insuficiente para operar: *{saldo:.2f} USDT*", parse_mode="Markdown")
+        if saldo < 5:
+            await bot.send_message(CHAT_ID, f"⚠️ Saldo insuficiente ({saldo:.2f} USDT). Esperando…")
             await asyncio.sleep(60)
             continue
-        # Aquí iría tu lógica de scalping: análisis, órdenes market, TP/SL…
-        await bot.send_message(CHAT_ID, f"🔎 Escaneando mercado con *{saldo:.2f} USDT* disponibles…", parse_mode="Markdown")
-        await asyncio.sleep(30)  # ajusta intervalo según estrategia
+        # Aquí iría la lógica real de scalping
+        await bot.send_message(CHAT_ID, f"🔎 Escaneando con {saldo:.2f} USDT disponibles…")
+        await asyncio.sleep(30)
 
-# Punto de entrada
-async def main():
+# Punto de entrada\async def main():
     logging.basicConfig(level=logging.INFO)
-    # Elimina cualquier webhook que pudiera estar activo
     await bot.delete_webhook(drop_pending_updates=True)
-    # Inicia polling sin conflicto
     await dp.start_polling(bot)
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     asyncio.run(main())
+```
