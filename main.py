@@ -105,9 +105,11 @@ async def loop_operaciones():
                     break
 
                 try:
-                    stats = market_client.get_24hr_stats(par)
-                    precio_actual = float(stats['last'] or 0)
-                    volumen_24h = float(stats['volValue'] or 0)
+                    ticker = market_client.get_ticker(par)
+                    logging.debug(f"TICKER DEBUG para {par}: {ticker}")
+
+                    precio_actual = float(ticker.get("price") or 0)
+                    volumen_24h = float(ticker.get("volValue") or 0)
 
                     if volumen_24h == 0 or precio_actual == 0:
                         logging.warning(f"⚠️ Datos no válidos para {par}")
@@ -166,8 +168,8 @@ async def monitorear_salida():
 
     while True:
         try:
-            stats = market_client.get_24hr_stats(operacion_activa["par"])
-            precio_actual = float(stats["last"])
+            ticker = market_client.get_ticker(operacion_activa["par"])
+            precio_actual = float(ticker.get("price"))
 
             if precio_actual > precio_max:
                 precio_max = precio_actual
