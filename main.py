@@ -1,185 +1,121 @@
-import os
-import asyncio
 import logging
-from kucoin.client import Client
+import asyncio
+import os
 from aiogram import Bot, Dispatcher, types
-from aiogram.filters import Command
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
-import random
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from dotenv import load_dotenv
+from kucoin.client import Client
+from kucoin.exceptions import KucoinAPIException
 
-# ─── Logging ─────────────────────────────────────────────────────────────
-logging.basicConfig(level=logging.INFO)
+load_dotenv()
 
-# ─── Configuración ────────────────────────────────────────────────────────
-API_KEY        = os.getenv("API_KEY")
-API_SECRET     = os.getenv("SECRET_KEY")
-API_PASSPHRASE = os.getenv("API_PASSPHRASE")
+API_KEY = os.getenv("API_KEY")
+API_SECRET = os.getenv("SECRET_KEY")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT_ID        = int(os.getenv("CHAT_ID", 0))
+CHAT_ID = os.getenv("CHAT_ID")
 
-# ─── Clientes ─────────────────────────────────────────────────────────────
-kucoin = Client(API_KEY, API_SECRET, API_PASSPHRASE)
 bot = Bot(token=TELEGRAM_TOKEN)
-dp = Dispatcher()
+dp = Dispatcher(bot)
 
-# ─── Variables Globales ───────────────────────────────────────────────────
-_last_balance = 0.0
-bot_encendido = False
-operacion_activa = None
-pares = ["PEPE/USDT", "FLOKI/USDT", "SHIB/USDT", "DOGE/USDT"]
+client = Client(API_KEY, API_SECRET)
 
-# ─── Teclado de opciones ──────────────────────────────────────────────────
-keyboard = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="🚀 Encender Bot"), KeyboardButton(text="🛑 Apagar Bot")],
-        [KeyboardButton(text="📊 Estado del Bot"), KeyboardButton(text="💰 Actualizar Saldo")],
-        [KeyboardButton(text="📈 Estado de Orden Actual")],
-    ],
-    resize_keyboard=True,
-)# ─── Comandos del Bot ─────────────────────────────────────────────────────
-
-@dp.message(Command("start"))
-async def cmd_start(message: types.Message):
-    await message.answer(
-        "✅ *ZafroBot PRO Scalper Inteligente* iniciado.\n\nSelecciona una opción:",
-        reply_markup=keyboard,
-        parse_mode="Markdown"
-    )
-
-@dp.message(lambda m: m.text == "🚀 Encender Bot")
-async def cmd_encender(message: types.Message):
-    global bot_encendido
-    if not bot_encendido:
-        bot_encendido = True
-        await message.answer("🟢 Bot encendido. Analizando mercado…")
-        asyncio.create_task(operar())
-    else:
-        await message.answer("⚠️ El bot ya está encendido.")
-
-@dp.message(lambda m: m.text == "🛑 Apagar Bot")
-async def cmd_apagar(message: types.Message):
-    global bot_encendido
-    bot_encendido = False
-    await message.answer("🔴 Bot apagado.")
-
-@dp.message(lambda m: m.text == "📊 Estado del Bot")
-async def cmd_estado(message: types.Message):
-    estado = "🟢 Encendido" if bot_encendido else "🔴 Apagado"
-    await message.answer(f"📊 Estado actual: {estado}")
-
-@dp.message(lambda m: m.text == "💰 Actualizar Saldo")
-async def cmd_saldo(message: types.Message):
-    balance = await obtener_balance()
-    await message.answer(f"💰 Saldo disponible: {balance:.2f} USDT")
-
-@dp.message(lambda m: m.text == "📈 Estado de Orden Actual")
-async def cmd_estado_orden(message: types.Message):
-    if operacion_activa:
-        par, precio, cantidad = operacion_activa
-        precio_actual = await asyncio.to_thread(obtener_precio, par)
-        diferencia = precio_actual - precio
-        signo = "🟢" if diferencia > 0 else "🔴"
-        await message.answer(f"{signo} Orden en {par}\nEntrada: {precio:.6f} | Actual: {precio_actual:.6f}")
-    else:
-        await message.answer("ℹ️ No hay ninguna operación activa actualmente.")# ─── Lógica del Bot ────────────────────────────────────────────────────────
-
-async def obtener_balance():
+pares = ["SHIB/USDT", "DOGE/USDT", "PEPE/USDT", "FLOKI/USDT"]
+modo_agresivo = True
+bot_activo = Falsedef obtener_saldo_disponible():
     try:
-        cuenta = await asyncio.to_thread(kucoin.get_accounts, currency="USDT", type="trade")
-        if cuenta:
-            return float(cuenta[0].get("available", 0))
+        cuentas = client.get_accounts()
+        for cuenta in cuentas:
+            if cuenta['currency'] == 'USDT' and cuenta['type'] == 'trade':
+                return float(cuenta['available'])
+        return 0.0
     except Exception as e:
-        logging.error(f"Error al obtener balance: {str(e)}")
-    return 0.0
-
-async def operar():
-    global _last_balance, operacion_activa
-    _last_balance = await obtener_balance()
-
-    while bot_encendido:
-        try:
-            balance = await obtener_balance()
-            if balance < 5:
-                await bot.send_message(CHAT_ID, f"⚠️ Saldo insuficiente ({balance:.2f} USDT). Esperando...")
-                await asyncio.sleep(60)
-                continue
-
-            par = random.choice(pares)
-            precio_actual = await asyncio.to_thread(obtener_precio, par)
-
-            if analizar_entrada(par, precio_actual):
-                cantidad = calcular_cantidad(balance, precio_actual)
-                if cantidad > 0:
-                    orden = await asyncio.to_thread(ejecutar_compra, par, cantidad)
-                    if orden:
-                        operacion_activa = (par, precio_actual, cantidad)
-                        await bot.send_message(CHAT_ID, f"✅ Entrada en {par} a {precio_actual:.8f} USDT")
-                        await monitorear_operacion(par, precio_actual, cantidad)
-                        operacion_activa = None
-            await asyncio.sleep(15)
-
-        except Exception as e:
-            logging.error(f"Error general en operar(): {str(e)}")
-            await asyncio.sleep(60)
-
-def analizar_entrada(par, precio_actual):
-    return random.choice([True, False, False, False])  # Aumenta precisión ajustando pesos
-
-def calcular_cantidad(balance, precio):
-    porcentaje = 0.9 if balance <= 20 else 0.5 if balance <= 60 else 0.25
-    monto = balance * porcentaje
-    cantidad = monto / precio
-    return round(cantidad, 6)# ─── Operación y Monitoreo ─────────────────────────────────────────────────
-
-async def monitorear_operacion(par, precio_entrada, cantidad):
-    objetivo = precio_entrada * random.uniform(1.025, 1.06)  # Objetivo: entre +2.5% y +6%
-    stop_loss = precio_entrada * 0.985  # Stop Loss de -1.5%
-    simbolo = par.replace("/", "-")
-
-    while bot_encendido:
-        try:
-            precio_actual = await asyncio.to_thread(obtener_precio, par)
-
-            if precio_actual >= objetivo:
-                await bot.send_message(
-                    CHAT_ID,
-                    f"🎯 ¡Take Profit alcanzado!\n\nPar: {par}\nPrecio Entrada: {precio_entrada:.8f}\nPrecio Actual: {precio_actual:.8f}"
-                )
-                break
-
-            elif precio_actual <= stop_loss:
-                await bot.send_message(
-                    CHAT_ID,
-                    f"⚡ ¡Stop Loss activado!\n\nPar: {par}\nPrecio Entrada: {precio_entrada:.8f}\nPrecio Actual: {precio_actual:.8f}"
-                )
-                break
-
-            await asyncio.sleep(5)
-
-        except Exception as e:
-            logging.error(f"Error en monitoreo de operación: {str(e)}")
-            await asyncio.sleep(10)
-
-def obtener_precio(par):
-    simbolo = par.replace("/", "-")
-    try:
-        ticker = kucoin.get_ticker(symbol=simbolo)
-        return float(ticker["price"])
-    except Exception as e:
-        logging.error(f"Error obteniendo precio de {par}: {str(e)}")
+        logging.error(f"Error obteniendo saldo: {e}")
         return 0.0
 
-def ejecutar_compra(par, cantidad):
-    simbolo = par.replace("/", "-")
+def obtener_volumen(par):
     try:
-        orden = kucoin.create_market_order(symbol=simbolo, side="buy", size=str(cantidad))
-        return orden
+        symbol = par.replace("/", "-")
+        ticker = client.get_ticker(symbol)
+        return float(ticker['volValue'])
     except Exception as e:
-        logging.error(f"Error ejecutando compra de {par}: {str(e)}")
-        return None# ─── Lanzamiento Final ─────────────────────────────────────────────────────
+        logging.error(f"Error obteniendo volumen de {par}: {e}")
+        return 0.0
 
-async def main():
-    await dp.start_polling(bot, skip_updates=True)
+def calcular_monto_operacion(saldo):
+    if saldo < 10:
+        return 0
+    if modo_agresivo:
+        return round(saldo * 0.9, 2)
+    elif saldo > 100:
+        return round(saldo * 0.5, 2)
+    else:
+        return round(saldo * 0.7, 2)def evaluar_condiciones_entrada(par):
+    try:
+        symbol = par.replace("/", "-")
+        kline = client.get_kline_data(symbol, '1min', limit=2)
+        if len(kline) < 2:
+            return False
+        close_anterior = float(kline[-2][2])
+        close_actual = float(kline[-1][2])
+        diferencia = ((close_actual - close_anterior) / close_anterior) * 100
+        volumen = obtener_volumen(par)
+        return diferencia > 0.25 and volumen > 1000
+    except Exception as e:
+        logging.error(f"Error analizando condiciones en {par}: {e}")
+        return False
+
+def operar(par):
+    try:
+        symbol = par.replace("/", "-")
+        saldo = obtener_saldo_disponible()
+        monto = calcular_monto_operacion(saldo)
+        if monto <= 0:
+            return
+        if evaluar_condiciones_entrada(par):
+            order = client.create_market_order(symbol=symbol, side='buy', funds=monto)
+            logging.info(f"Compra realizada en {par} con {monto} USDT")
+        else:
+            logging.info(f"No se cumplen condiciones en {par}")
+    except Exception as e:
+        logging.error(f"Error ejecutando compra de {par}: {e}")async def ciclo_operativo():
+    global bot_activo
+    while bot_activo:
+        try:
+            for par in pares:
+                operar(par)
+                await asyncio.sleep(2)  # Tiempo entre revisiones de pares
+            await asyncio.sleep(10)  # Pausa entre ciclos completos
+        except Exception as e:
+            logging.error(f"Error en el ciclo operativo: {e}")
+            await asyncio.sleep(10)
+
+@dp.message_handler(commands=['start'])
+async def start(message: types.Message):
+    markup = InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        InlineKeyboardButton("🚀 Encender Bot", callback_data="encender"),
+        InlineKeyboardButton("🛑 Apagar Bot", callback_data="apagar"),
+    )
+    await message.answer("Bienvenido a ZafroBot PRO Scalper Inteligente", reply_markup=markup)
+
+@dp.callback_query_handler()
+async def callbacks(call: types.CallbackQuery):
+    global bot_activo
+    if call.data == "encender":
+        if not bot_activo:
+            bot_activo = True
+            await call.message.answer("🟢 Bot encendido. Empezando a escanear...")
+            asyncio.create_task(ciclo_operativo())
+        else:
+            await call.message.answer("⚠️ El bot ya está activo.")
+    elif call.data == "apagar":
+        if bot_activo:
+            bot_activo = False
+            await call.message.answer("🔴 Bot apagado.")
+        else:
+            await call.message.answer("⚠️ El bot ya estaba apagado.")async def main():
+    await dp.start_polling()
 
 if __name__ == "__main__":
+    logging.info("Iniciando ZafroBot PRO...")
     asyncio.run(main())
