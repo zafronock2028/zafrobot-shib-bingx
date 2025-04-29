@@ -112,7 +112,7 @@ async def loop_operaciones():
                     break  # Solo una operación activa a la vez
 
                 ticker = market_client.get_ticker(par)
-                volumen_24h = float(ticker["volValue"])
+                volumen_24h = float(ticker.get('volValue', 0))
                 precio_actual = float(ticker["price"])
 
                 if volumen_24h <= 0:
