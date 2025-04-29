@@ -1,4 +1,4 @@
 python-dotenv==1.0.1
 aiogram==3.3.0
-kucoin==1.0.11
+kucoin-python==1.0.11
 aiohttp==3.9.3
