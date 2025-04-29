@@ -125,7 +125,7 @@ async def loop_operaciones():
                 if monto_final < 5:
                     continue  # Muy poco monto para operar
 
-                # Aquí seguirá el análisis de velas...
+                # Aquí seguirá tu análisis de velas...
 
         except Exception as e:
             logging.error(f"Error general en loop_operaciones: {e}")
