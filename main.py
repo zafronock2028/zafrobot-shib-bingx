@@ -128,11 +128,9 @@ async def loop_operaciones():
             # Aquí seguirá el análisis de velas...
 
     except Exception as e:
-        logging.error(f"Error general en loop_operaciones: {e}")
-        await asyncio.sleep(5)
-                logging.warning("Saldo insuficiente para operar.")
-                await asyncio.sleep(10)
-                continue
+    logging.error(f"Error general en loop_operaciones: {e}")
+    await asyncio.sleep(5)
+    continue
 
             for par in pares:
                 if operacion_activa:
