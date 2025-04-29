@@ -314,4 +314,120 @@ def calcular_kelly_ratio():
 
     kelly = (b * p - q) / b
 
-    return max(0.1, min(kelly, 0.9))
+    return max(0.1, min(kelly, 0.9))# ─── Sistema de Alertas de Volumen Anormal ──────────────────────────────────
+
+async def inicializar_volumenes():
+    global volumen_anterior
+    for par in pares:
+        simbolo = par.replace("/", "-")
+        try:
+            ticker = await asyncio.to_thread(kucoin.get_ticker, symbol=simbolo)
+            volumen = float(ticker.get('volValue', 0))
+            volumen_anterior[par] = volumen
+        except Exception as e:
+            logging.error(f"Error inicializando volumen de {par}: {str(e)}")
+            volumen_anterior[par] = 0.0
+
+async def escanear_volumenes():
+    global volumen_anterior
+    await inicializar_volumenes()
+
+    while True:
+        try:
+            for par in pares:
+                simbolo = par.replace("/", "-")
+                ticker = await asyncio.to_thread(kucoin.get_ticker, symbol=simbolo)
+                volumen_actual = float(ticker.get('volValue', 0))
+
+                volumen_ant = volumen_anterior.get(par, 0.0)
+                if volumen_ant == 0.0:
+                    volumen_anterior[par] = volumen_actual
+                    continue
+
+                incremento = ((volumen_actual - volumen_ant) / volumen_ant) * 100
+
+                if incremento >= 500:
+                    await bot.send_message(CHAT_ID,
+                        f"🚨 *ALERTA de Volumen Anormal*\n\n"
+                        f"Par: {par}\n"
+                        f"Incremento: +{incremento:.2f}%\n"
+                        f"Acción: Monitorear posible oportunidad.",
+                        parse_mode="Markdown"
+                    )
+
+                volumen_anterior[par] = volumen_actual
+
+            await asyncio.sleep(60)
+
+        except Exception as e:
+            logging.error(f"Error en escaneo de volumen: {str(e)}")
+            await asyncio.sleep(60)
+
+# ─── Comandos de Telegram ───────────────────────────────────────────────────
+
+@dp.message(Command("start"))
+async def cmd_start(message: types.Message):
+    await message.answer(
+        "✅ *ZafroBot PRO Scalper Inteligente* iniciado.\n\nSelecciona una opción:",
+        reply_markup=keyboard,
+        parse_mode="Markdown"
+    )
+
+@dp.message(lambda m: m.text == "🚀 Encender Bot")
+async def cmd_encender(message: types.Message):
+    global bot_encendido
+    if not bot_encendido:
+        bot_encendido = True
+        await message.answer("🟢 Bot encendido. Analizando mercado…")
+        asyncio.create_task(operar())
+    else:
+        await message.answer("⚠️ El bot ya está encendido.")
+
+@dp.message(lambda m: m.text == "🛑 Apagar Bot")
+async def cmd_apagar(message: types.Message):
+    global bot_encendido
+    bot_encendido = False
+    await message.answer("🔴 Bot apagado.")
+
+@dp.message(lambda m: m.text == "📊 Estado del Bot")
+async def cmd_estado(message: types.Message):
+    estado = "🟢 Encendido" if bot_encendido else "🔴 Apagado"
+    await message.answer(f"📊 Estado actual: {estado}")
+
+@dp.message(lambda m: m.text == "💰 Actualizar Saldo")
+async def cmd_actualizar_saldo(message: types.Message):
+    balance = await obtener_balance()
+    await message.answer(f"💰 Saldo disponible: {balance:.2f} USDT")
+
+@dp.message(lambda m: m.text == "📈 Estado de Orden Actual")
+async def cmd_estado_orden(message: types.Message):
+    if operacion_activa is None:
+        await message.answer("⚠️ No hay operaciones abiertas en este momento.")
+    else:
+        par = operacion_activa["par"]
+        precio_entrada = operacion_activa["precio_entrada"]
+        cantidad = operacion_activa["cantidad"]
+        saldo_usado = operacion_activa["saldo_usado"]
+        precio_actual = await asyncio.to_thread(obtener_precio, par)
+
+        porcentaje_cambio = ((precio_actual - precio_entrada) / precio_entrada) * 100
+
+        estado = "🟢 En Ganancia" if porcentaje_cambio > 0 else "🔴 En Pérdida"
+
+        await message.answer(
+            f"📈 Estado de Orden Actual:\n\n"
+            f"Par: {par}\n"
+            f"Precio Entrada: {precio_entrada:.8f}\n"
+            f"Precio Actual: {precio_actual:.8f}\n"
+            f"{estado}: {porcentaje_cambio:.2f}%\n"
+            f"Saldo Invertido: {saldo_usado:.2f} USDT"
+        )
+
+# ─── Lanzamiento Final ──────────────────────────────────────────────────────
+
+async def main():
+    asyncio.create_task(escanear_volumenes())
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
