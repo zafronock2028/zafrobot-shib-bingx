@@ -111,4 +111,112 @@ async def estado_orden_actual(message: types.Message):
 # --- Lanzador de AIOgram ---
 if __name__ == '__main__':
     from aiogram import executor
-    executor.start_polling(dp, skip_updates=True)
+    executor.start_polling(dp, skip_updates=True)async def escaneo_mercado():
+    global operacion_en_curso
+    global saldo_actual
+
+    while operacion_en_curso:
+        try:
+            for par in pares:
+                # Verificar que hay saldo suficiente antes de operar
+                saldo_actual = await obtener_saldo()
+                if saldo_actual < 5:
+                    logging.warning("⚠️ Saldo insuficiente para operar.")
+                    await asyncio.sleep(10)
+                    continue
+
+                # Obtener volumen de 24h
+                volumen_24h = await obtener_volumen_24h(par)
+                if volumen_24h is None:
+                    logging.warning(f"⚠️ No se pudo obtener volumen para {par}.")
+                    continue
+
+                # Calcular monto de operación basado en volumen
+                monto_operacion = min(saldo_actual, volumen_24h * 0.04)
+
+                if monto_operacion < 5:
+                    logging.warning(f"⚠️ Monto de operación muy pequeño en {par}.")
+                    continue
+
+                # Obtener precio actual
+                ticker = await client.get_ticker(par)
+                precio_actual = float(ticker['price'])
+
+                # Definir precios de compra y objetivo
+                precio_compra = precio_actual
+                precio_objetivo = precio_compra * 1.015  # 1.5% de ganancia
+
+                # Ejecutar compra
+                orden_compra = await client.create_market_order(
+                    symbol=par,
+                    side='buy',
+                    size=round(monto_operacion / precio_actual, 6)
+                )
+                logging.info(f"✅ Compra ejecutada en {par} a {precio_compra:.6f}")
+
+                await bot.send_message(
+                    CHAT_ID,
+                    f"✅ COMPRA ejecutada en {par}\nPrecio de Entrada: {precio_compra:.6f} USDT\n"
+                    f"Objetivo de Venta: {precio_objetivo:.6f} USDT"
+                )
+
+                # Esperar a que el precio suba al objetivo o aplicar trailing stop
+                await gestionar_salida(par, precio_compra)
+
+        except Exception as e:
+            logging.error(f"❌ Error en escaneo de mercado: {e}")
+
+        await asyncio.sleep(15)  # Espera antes de volver a escanearasync def gestionar_salida(par, precio_entrada):
+    global operacion_en_curso
+    stop_loss = calcular_trailing_stop(precio_entrada)
+
+    try:
+        while operacion_en_curso:
+            ticker = await client.get_ticker(par)
+            precio_actual = float(ticker['price'])
+
+            if precio_actual >= precio_entrada * 1.015:
+                # Precio objetivo alcanzado (1.5% ganancia)
+                await client.create_market_order(
+                    symbol=par,
+                    side='sell',
+                    size=round(await obtener_balance_par(par), 6)
+                )
+                logging.info(f"✅ Venta ejecutada en {par} a {precio_actual:.6f} (Objetivo alcanzado)")
+                await bot.send_message(
+                    CHAT_ID,
+                    f"✅ VENTA ejecutada en {par}\nPrecio de Salida: {precio_actual:.6f} USDT\n"
+                    f"Ganancia alcanzada: 1.5%."
+                )
+                operacion_en_curso = False
+                break
+
+            if precio_actual <= stop_loss:
+                # Activar Trailing Stop (-8%)
+                await client.create_market_order(
+                    symbol=par,
+                    side='sell',
+                    size=round(await obtener_balance_par(par), 6)
+                )
+                logging.info(f"⚠️ Venta ejecutada por Trailing Stop en {par} a {precio_actual:.6f}")
+                await bot.send_message(
+                    CHAT_ID,
+                    f"⚠️ VENTA por Trailing Stop en {par}\nPrecio de Salida: {precio_actual:.6f} USDT"
+                )
+                operacion_en_curso = False
+                break
+
+            await asyncio.sleep(5)
+
+    except Exception as e:
+        logging.error(f"❌ Error en gestión de salida: {e}")async def obtener_balance_par(par):
+    try:
+        symbol_base = par.split('-')[0]  # Obtener solo la moneda (por ejemplo, SHIB de SHIB-USDT)
+        cuentas = user_client.get_account_list()
+        for cuenta in cuentas:
+            if cuenta['currency'] == symbol_base and cuenta['type'] == 'trade':
+                return float(cuenta['available'])
+        return 0.0
+    except Exception as e:
+        logging.error(f"Error al obtener balance de {par}: {e}")
+        return 0.0
