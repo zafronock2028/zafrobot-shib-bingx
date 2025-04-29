@@ -1,14 +1,13 @@
 import os
 import asyncio
 import logging
-from datetime import datetime
 from kucoin.client import Market, Trade, User
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from dotenv import load_dotenv
 
-# ─── Cargar variables de entorno ───
+# ─── Configuración inicial ───
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 
@@ -25,13 +24,12 @@ user_client = User(API_KEY, SECRET_KEY, API_PASSPHRASE)
 market_client = Market()
 trade_client = Trade(key=API_KEY, secret=SECRET_KEY, passphrase=API_PASSPHRASE)
 
-# ─── Variables Globales ───
+# ─── Variables ───
 bot_encendido = False
 operacion_activa = None
 pares = ["SHIB-USDT", "PEPE-USDT", "FLOKI-USDT", "DOGE-USDT"]
 trailing_stop_pct = -0.08
 
-# ─── Teclado para Telegram ───
 keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🚀 Encender Bot")],
@@ -43,14 +41,30 @@ keyboard = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
-# ─── Comandos de Telegram ───
+# ─── Funciones ───
+async def notificar_telegram(mensaje):
+    try:
+        await bot.send_message(chat_id=CHAT_ID, text=mensaje)
+    except Exception as e:
+        logging.error(f"Error enviando mensaje a Telegram: {e}")
+
+def obtener_saldo_disponible():
+    try:
+        cuentas = user_client.get_account_list()
+        saldo = next((float(c["available"]) for c in cuentas if c["currency"] == "USDT" and c["type"] == "trade"), 0.0)
+        return saldo
+    except Exception as e:
+        logging.error(f"Error obteniendo saldo: {e}")
+        return 0.0
+
+# ─── Comandos ───
 @dp.message(Command("start"))
 async def start(message: types.Message):
     await message.answer("✅ ¡Bienvenido al Zafrobot Dinámico Pro Scalping!", reply_markup=keyboard)
 
 @dp.message()
-async def comandos_principales(message: types.Message):
-    global bot_encendido, operacion_activa
+async def comandos(message: types.Message):
+    global bot_encendido
 
     if message.text == "💰 Saldo":
         saldo = obtener_saldo_disponible()
@@ -60,48 +74,39 @@ async def comandos_principales(message: types.Message):
         if not bot_encendido:
             bot_encendido = True
             await message.answer("✅ Bot encendido. Analizando oportunidades...")
+            await notificar_telegram("✅ Bot encendido.")
             asyncio.create_task(loop_operaciones())
         else:
             await message.answer("⚠️ El bot ya está encendido.")
 
     elif message.text == "🛑 Apagar Bot":
         bot_encendido = False
-        await message.answer("🛑 Bot apagado manualmente.")
+        await message.answer("🛑 Bot apagado.")
+        await notificar_telegram("🛑 Bot apagado.")
 
     elif message.text == "📊 Estado Bot":
         estado = "✅ ENCENDIDO" if bot_encendido else "🛑 APAGADO"
-        await message.answer(f"📊 Estado actual del bot: {estado}")
+        await message.answer(f"📊 Estado del bot: {estado}")
 
     elif message.text == "📈 Estado de Orden Actual":
         if operacion_activa:
-            estado = "GANANCIA ✅" if operacion_activa["ganancia"] >= 0 else "PÉRDIDA ❌"
             await message.answer(
                 f"📈 Operación activa en {operacion_activa['par']}\n"
-                f"Entrada: {operacion_activa['entrada']:.6f} USDT\n"
-                f"Actual: {operacion_activa['actual']:.6f} USDT\n"
-                f"Ganancia: {operacion_activa['ganancia']:.6f} USDT ({estado})"
+                f"Entrada: {operacion_activa['entrada']:.8f} USDT\n"
+                f"Actual: {operacion_activa['actual']:.8f} USDT\n"
+                f"Ganancia: {operacion_activa['ganancia']:.4f} USDT"
             )
         else:
-            await message.answer("⚠️ No hay operaciones activas actualmente.")
+            await message.answer("⚠️ No hay operaciones activas.")
 
-# ─── Funciones de Trading ───
-def obtener_saldo_disponible():
-    try:
-        cuentas = user_client.get_account_list()
-        saldo_usdt = next((float(x['available']) for x in cuentas if x['currency'] == "USDT" and x['type'] == "trade"), 0.0)
-        return saldo_usdt
-    except Exception as e:
-        logging.error(f"Error obteniendo saldo: {e}")
-        return 0.0
-
+# ─── Lógica Principal ───
 async def loop_operaciones():
-    global bot_encendido, operacion_activa
+    global operacion_activa
 
     while bot_encendido:
         try:
             saldo = obtener_saldo_disponible()
             if saldo < 5:
-                logging.warning("Saldo insuficiente para operar.")
                 await asyncio.sleep(10)
                 continue
 
@@ -111,88 +116,75 @@ async def loop_operaciones():
 
                 try:
                     ticker = market_client.get_ticker(par)
-                    logging.debug(f"TICKER DEBUG para {par}: {ticker}")
+                    precio = float(ticker["price"])
+                    orden = market_client.get_order_book_level1(par)
+                    volumen = float(orden["size"])
 
-                    precio_actual = float(ticker.get("price", 0))
-                    volumen_24h = float(ticker.get("size", 0)) * precio_actual
-
-                    if volumen_24h == 0 or precio_actual == 0:
-                        logging.warning(f"⚠️ Datos no válidos para {par}")
+                    if precio == 0 or volumen == 0:
                         continue
 
-                    logging.info(f"Analizando {par} | Volumen 24h: {volumen_24h}")
-                    porcentaje_inversion = 0.8 if volumen_24h > 100000 else 0.5
-                    monto_usar = saldo * porcentaje_inversion
-                    monto_maximo_volumen = volumen_24h * 0.04
-                    monto_final = min(monto_usar, monto_maximo_volumen)
-                    logging.info(f"➡️ Monto a usar en {par}: {monto_final}")
+                    porcentaje = 0.8 if volumen > 100000 else 0.5
+                    monto = min(saldo * porcentaje, volumen * 0.04)
 
-                    if monto_final < 5:
+                    if monto < 5:
                         continue
 
-                    velas = market_client.get_kline(symbol=par, kline_type="1min", size=5)
+                    velas = market_client.get_kline(par, "1min", 5)
                     precios = [float(v[2]) for v in velas]
-                    if not precios:
-                        logging.warning(f"⚠️ Velas vacías para {par}")
-                        continue
+                    promedio = sum(precios) / len(precios)
 
-                    promedio_precio = sum(precios) / len(precios)
+                    if precio < promedio:
+                        cantidad = round(monto / precio, 0)
+                        trade_client.create_market_order(par, "buy", str(int(cantidad)))
 
-                    if precio_actual < promedio_precio:
-                        cantidad = round(monto_final / precio_actual, 2)
-                        trade_client.create_market_order(
-                            symbol=par,
-                            side="buy",
-                            size=str(cantidad)
-                        )
-                        logging.info(f"Comprado {cantidad} de {par} a {precio_actual}")
                         operacion_activa = {
                             "par": par,
-                            "entrada": precio_actual,
+                            "entrada": precio,
                             "cantidad": cantidad,
-                            "actual": precio_actual,
+                            "actual": precio,
                             "ganancia": 0.0
                         }
+
+                        await notificar_telegram(f"🟢 COMPRA: {par} | Cantidad: {cantidad} | Precio: {precio:.8f}")
                         await monitorear_salida()
                         break
 
                 except Exception as e:
-                    logging.error(f"Error procesando par {par}: {e}")
-                    continue
+                    logging.error(f"Error en par {par}: {e}")
 
         except Exception as e:
-            logging.error(f"Error general en loop_operaciones: {e}")
-            await asyncio.sleep(5)
-            continue
+            logging.error(f"Error general: {e}")
 
-        await asyncio.sleep(2)
+        await asyncio.sleep(3)
 
-# ─── Monitoreo de Salida con Trailing Stop ───
+# ─── Monitorear salida ───
 async def monitorear_salida():
     global operacion_activa
-    precio_max = operacion_activa["entrada"]
+    maximo = operacion_activa["entrada"]
 
     while True:
         try:
             ticker = market_client.get_ticker(operacion_activa["par"])
-            precio_actual = float(ticker["price"])
+            precio = float(ticker["price"])
 
-            if precio_actual > precio_max:
-                precio_max = precio_actual
+            if precio > maximo:
+                maximo = precio
 
-            variacion = (precio_actual - operacion_activa["entrada"]) / operacion_activa["entrada"]
-            retroceso = (precio_actual - precio_max) / precio_max
+            variacion = (precio - operacion_activa["entrada"]) / operacion_activa["entrada"]
+            retroceso = (precio - maximo) / maximo
+            ganancia = (precio - operacion_activa["entrada"]) * operacion_activa["cantidad"]
 
-            ganancia_actual = (precio_actual - operacion_activa["entrada"]) * operacion_activa["cantidad"]
-            operacion_activa["actual"] = precio_actual
-            operacion_activa["ganancia"] = ganancia_actual
+            operacion_activa["actual"] = precio
+            operacion_activa["ganancia"] = ganancia
 
-            if variacion >= 0.02 or retroceso <= trailing_stop_pct:
-                logging.info(f"✅ VENTA en {operacion_activa['par']} a {precio_actual} USDT")
+            if variacion >= 0.025 or retroceso <= trailing_stop_pct:
                 trade_client.create_market_order(
                     symbol=operacion_activa["par"],
                     side="sell",
-                    size=str(operacion_activa["cantidad"])
+                    size=str(int(operacion_activa["cantidad"]))
+                )
+                await notificar_telegram(
+                    f"🔴 VENTA: {operacion_activa['par']} | Precio: {precio:.8f} | Ganancia: {ganancia:.4f} USDT"
                 )
                 operacion_activa = None
                 break
@@ -202,7 +194,7 @@ async def monitorear_salida():
 
         await asyncio.sleep(2)
 
-# ─── Iniciar Bot ───
+# ─── Ejecutar ───
 async def main():
     await dp.start_polling(bot)
 
