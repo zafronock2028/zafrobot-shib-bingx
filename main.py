@@ -1,142 +1,89 @@
-# ---- Bloque 1: Importaciones ----
-import asyncio
-import logging
 import os
-import random
-import aiohttp
-from dotenv import load_dotenv
+import asyncio
+from kucoin.client import User as UserClient
 from aiogram import Bot, Dispatcher, types
-from kucoin.client import Client
+from aiogram.filters import Command
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from dotenv import load_dotenv
 
-# ---- Bloque 2: Cargar variables de entorno ----
 load_dotenv()
 
-API_KEY = os.getenv('API_KEY')
-API_SECRET = os.getenv('SECRET_KEY')
-API_PASSPHRASE = os.getenv('API_PASSPHRASE')
-TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-CHAT_ID = os.getenv('CHAT_ID')
+# Credenciales de KuCoin (usando los nombres correctos)
+API_KEY = os.getenv("API_KEY")
+SECRET_KEY = os.getenv("SECRET_KEY")
+API_PASSPHRASE = os.getenv("API_PASSPHRASE")
 
-client = Client(API_KEY, API_SECRET, API_PASSPHRASE)
+# Token del Bot de Telegram
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+
+# Crear cliente de KuCoin
+client = UserClient(API_KEY, SECRET_KEY, API_PASSPHRASE)
+
+# Crear Bot
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
-dp = Dispatcher(bot)
+dp = Dispatcher()
 
-# ---- Bloque 3: Variables globales ----
-pares = ['SHIB-USDT', 'PEPE-USDT', 'FLOKI-USDT', 'BONK-USDT']
-operacion_en_curso = False
-saldo_actual = 0.0
-TRAILING_STOP_PERCENT = 8  # 8%
+# Configurar teclado
+keyboard = ReplyKeyboardMarkup(keyboard=[
+    [KeyboardButton(text="🚀 Encender Bot")],
+    [KeyboardButton(text="🛑 Apagar Bot")],
+    [KeyboardButton(text="💰 Saldo")],
+    [KeyboardButton(text="📊 Estado Bot")]
+], resize_keyboard=True)
 
-# ---- Bloque 4: Funciones Utilitarias ----
-def calcular_trailing_stop(precio_entrada):
-    stop_loss = precio_entrada * (1 - TRAILING_STOP_PERCENT / 100)
-    return stop_loss
+# Variable para controlar el encendido del bot
+bot_encendido = False
 
-async def obtener_saldo():
-    try:
-        accounts = client.get_accounts()
-        for acc in accounts:
-            if acc['currency'] == 'USDT' and acc['type'] == 'trade':
-                return float(acc['available'])
-        return 0.0
-    except Exception as e:
-        logging.error(f"Error al obtener saldo: {e}")
-        return 0.0
+@dp.message(Command("start"))
+async def start(message: types.Message):
+    await message.answer("¡Bienvenido al Zafrobot Dinámico Pro Scalping SHIB/USDT!", reply_markup=keyboard)
 
-async def obtener_precio(par):
-    try:
-        ticker = client.get_ticker(symbol=par)
-        return float(ticker['price'])
-    except Exception as e:
-        logging.error(f"Error al obtener precio: {e}")
-        return None
+@dp.message()
+async def manejar_mensajes(message: types.Message):
+    global bot_encendido
+    texto = message.text
 
-async def comprar(par, monto):
-    try:
-        client.create_market_order(par, 'buy', funds=monto)
-        return True
-    except Exception as e:
-        logging.error(f"Error en compra: {e}")
-        return False
+    if texto == "🚀 Encender Bot":
+        bot_encendido = True
+        await message.answer("✅ Bot encendido. Operando en automático.")
+        asyncio.create_task(iniciar_operacion())
 
-async def vender(par, cantidad):
-    try:
-        client.create_market_order(par, 'sell', size=cantidad)
-        return True
-    except Exception as e:
-        logging.error(f"Error en venta: {e}")
-        return False
+    elif texto == "🛑 Apagar Bot":
+        bot_encendido = False
+        await message.answer("🛑 Bot apagado manualmente.")
 
-# ---- Bloque 5: Lógica del Bot ----
-async def escanear_mercado():
-    global operacion_en_curso
-    global saldo_actual
+    elif texto == "💰 Saldo":
+        saldo = obtener_saldo()
+        await message.answer(f"💰 Tu saldo disponible es: {saldo:.2f} USDT")
 
-    while operacion_en_curso:
+    elif texto == "📊 Estado Bot":
+        estado = "ENCENDIDO ✅" if bot_encendido else "APAGADO 🛑"
+        await message.answer(f"📊 Estado actual del bot: {estado}")
+
+async def iniciar_operacion():
+    global bot_encendido
+    while bot_encendido:
         try:
-            saldo_actual = await obtener_saldo()
-            if saldo_actual < 5:
-                logging.warning("Saldo insuficiente para operar.")
-                await asyncio.sleep(10)
-                continue
-
-            par = random.choice(pares)
-            precio_entrada = await obtener_precio(par)
-            if precio_entrada is None:
-                await asyncio.sleep(5)
-                continue
-
-            monto_operacion = saldo_actual * 0.8
-            compra_exitosa = await comprar(par, monto_operacion)
-
-            if compra_exitosa:
-                await bot.send_message(CHAT_ID, f"✅ Compra ejecutada en {par} a {precio_entrada}")
-                stop_loss = calcular_trailing_stop(precio_entrada)
-
-                while True:
-                    precio_actual = await obtener_precio(par)
-                    if precio_actual is None:
-                        await asyncio.sleep(5)
-                        continue
-
-                    if precio_actual >= precio_entrada * 1.015:
-                        await vender(par, await obtener_saldo())
-                        await bot.send_message(CHAT_ID, f"✅ Venta por ganancia en {par}")
-                        operacion_en_curso = False
-                        break
-                    elif precio_actual <= stop_loss:
-                        await vender(par, await obtener_saldo())
-                        await bot.send_message(CHAT_ID, f"⚠️ Venta por Trailing Stop en {par}")
-                        operacion_en_curso = False
-                        break
-
-                    await asyncio.sleep(10)
+            saldo = obtener_saldo()
+            if saldo > 5:  # Ejemplo de lógica simple
+                print("Comprando SHIB...")
+            await asyncio.sleep(10)
         except Exception as e:
-            logging.error(f"Error en escaneo: {e}")
+            print(f"Error en operación: {e}")
             await asyncio.sleep(10)
 
-# ---- Bloque 6: Comandos de Telegram ----
-@dp.message_handler(commands=['start'])
-async def cmd_start(message: types.Message):
-    await message.answer("✅ Bot iniciado correctamente.")
+def obtener_saldo():
+    try:
+        cuentas = client.get_account_list()
+        usdt_cuenta = next((c for c in cuentas if c['currency'] == 'USDT' and c['type'] == 'trade'), None)
+        if usdt_cuenta:
+            return float(usdt_cuenta['available'])
+    except Exception as e:
+        print(f"Error obteniendo saldo: {e}")
+    return 0.0
 
-@dp.message_handler(commands=['encender'])
-async def cmd_encender(message: types.Message):
-    global operacion_en_curso
-    if not operacion_en_curso:
-        operacion_en_curso = True
-        await bot.send_message(CHAT_ID, "✅ Bot encendido y escaneando mercado.")
-        asyncio.create_task(escanear_mercado())
-    else:
-        await message.answer("⚠️ El bot ya está encendido.")
+async def main():
+    await dp.start_polling(bot)
 
-@dp.message_handler(commands=['apagar'])
-async def cmd_apagar(message: types.Message):
-    global operacion_en_curso
-    operacion_en_curso = False
-    await message.answer("⛔ Bot apagado.")
-
-# ---- Lanzador del Bot ----
-if __name__ == '__main__':
-    from aiogram import executor
-    executor.start_polling(dp, skip_updates=True)
+if __name__ == "__main__":
+    asyncio.run(main())
