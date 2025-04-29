@@ -75,15 +75,13 @@ async def comandos_principales(message: types.Message):
     elif message.text == "📈 Estado de Orden Actual":
         if operacion_activa:
             estado = "GANANCIA ✅" if operacion_activa["ganancia"] >= 0 else "PÉRDIDA ❌"
-            await message.answer(
-                f"📈 Operación activa en {operacion_activa['par']}
-"
-                f"Entrada: {operacion_activa['entrada']:.6f} USDT
-"
-                f"Actual: {operacion_activa['actual']:.6f} USDT
-"
+            texto = (
+                f"📈 Operación activa en {operacion_activa['par']}\n"
+                f"Entrada: {operacion_activa['entrada']:.6f} USDT\n"
+                f"Actual: {operacion_activa['actual']:.6f} USDT\n"
                 f"Ganancia: {operacion_activa['ganancia']:.6f} USDT ({estado})"
             )
+            await message.answer(texto)
         else:
             await message.answer("⚠️ No hay operaciones activas actualmente.")
 
