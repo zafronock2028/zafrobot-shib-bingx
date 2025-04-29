@@ -44,13 +44,15 @@ volumen_anterior = {}
 historico_en_memoria = []
 modelo_predictor = None
 
-# ─── Reglas de tamaño mínimo por par ───────────────────────────────────────
+# ─── Reglas de tamaño mínimo ───────────────────────────────────────────────
 minimos_por_par = {
     "PEPE/USDT": {"min_cantidad": 100000, "decimales": 0},
     "FLOKI/USDT": {"min_cantidad": 100000, "decimales": 0},
     "SHIB/USDT": {"min_cantidad": 10000, "decimales": 0},
     "DOGE/USDT": {"min_cantidad": 1, "decimales": 2},
-}# ─── Teclado de Comandos ────────────────────────────────────────────────────
+}
+
+# ─── Teclado de Telegram ────────────────────────────────────────────────────
 keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🚀 Encender Bot"), KeyboardButton(text="🛑 Apagar Bot")],
@@ -58,9 +60,42 @@ keyboard = ReplyKeyboardMarkup(
         [KeyboardButton(text="📈 Estado de Orden Actual")],
     ],
     resize_keyboard=True,
-)
+)# ─── Funciones Internas ─────────────────────────────────────────────────────
 
-# ─── Funciones de Análisis ──────────────────────────────────────────────────
+async def obtener_balance():
+    cuenta = await asyncio.to_thread(kucoin.get_accounts, currency="USDT", type="trade")
+    if cuenta:
+        return float(cuenta[0].get('available', 0))
+    return 0.0
+
+def obtener_precio(par):
+    simbolo = par.replace("/", "-")
+    ticker = kucoin.get_ticker(symbol=simbolo)
+    return float(ticker["price"])
+
+def calcular_cantidad(par, saldo, precio):
+    reglas = minimos_por_par.get(par)
+    if reglas is None:
+        return 0.0
+
+    min_cantidad = reglas["min_cantidad"]
+    decimales = reglas["decimales"]
+
+    cantidad = saldo / precio
+    cantidad = Decimal(cantidad).quantize(Decimal('1.' + '0' * decimales), rounding=ROUND_DOWN)
+
+    if cantidad < min_cantidad:
+        return 0.0
+    return float(cantidad)
+
+def ejecutar_compra(par, cantidad):
+    simbolo = par.replace("/", "-")
+    try:
+        orden = kucoin.create_market_order(symbol=simbolo, side="buy", size=str(cantidad))
+        return orden
+    except Exception as e:
+        logging.error(f"Error comprando {par}: {str(e)}")
+        return None
 
 async def analizar_mercado_real(par):
     try:
@@ -91,70 +126,7 @@ async def analizar_mercado_real(par):
 
     except Exception as e:
         logging.error(f"Error en analizar_mercado_real para {par}: {str(e)}")
-        return False
-
-# ─── Funciones de Gestión de Operaciones ────────────────────────────────────
-
-async def registrar_operacion(par, precio_entrada, cantidad, saldo_usado):
-    global operacion_activa
-    operacion_activa = {
-        "par": par,
-        "precio_entrada": precio_entrada,
-        "cantidad": cantidad,
-        "saldo_usado": saldo_usado,
-        "hora": datetime.datetime.now(),
-        "mejor_precio": precio_entrada
-    }
-
-async def limpiar_operacion():
-    global operacion_activa
-    operacion_activa = None
-
-async def actualizar_estadisticas(porcentaje_ganancia):
-    global operaciones_hoy, ganancia_total_hoy, historial_operaciones
-    operaciones_hoy += 1
-    ganancia_total_hoy += porcentaje_ganancia
-    historial_operaciones.append(porcentaje_ganancia)
-    if len(historial_operaciones) > 50:
-        historial_operaciones.pop(0)
-    entrenar_modelo()# ─── Funciones Internas ─────────────────────────────────────────────────────
-
-async def obtener_balance():
-    cuenta = await asyncio.to_thread(kucoin.get_accounts, currency="USDT", type="trade")
-    if cuenta:
-        return float(cuenta[0].get('available', 0))
-    return 0.0
-
-def obtener_precio(par):
-    simbolo = par.replace("/", "-")
-    ticker = kucoin.get_ticker(symbol=symbolo)
-    return float(ticker["price"])
-
-def calcular_cantidad(par, saldo, precio):
-    reglas = minimos_por_par.get(par)
-    if reglas is None:
-        return 0.0
-
-    min_cantidad = reglas["min_cantidad"]
-    decimales = reglas["decimales"]
-
-    cantidad = saldo / precio
-    cantidad = Decimal(cantidad).quantize(Decimal('1.' + '0' * decimales), rounding=ROUND_DOWN)
-
-    if cantidad < min_cantidad:
-        return 0.0
-    return float(cantidad)
-
-def ejecutar_compra(par, cantidad):
-    simbolo = par.replace("/", "-")
-    try:
-        orden = kucoin.create_market_order(symbol=simbolo, side="buy", size=str(cantidad))
-        return orden
-    except Exception as e:
-        logging.error(f"Error comprando {par}: {str(e)}")
-        return None
-
-# ─── Recolección de Datos en Memoria ────────────────────────────────────────
+        return False# ─── Recolección de Datos en Memoria ────────────────────────────────────────
 
 def recolectar_datos_en_memoria(par, precio_open, precio_high, precio_low, precio_close, volumen, spread, liquidez_compra, resultado=None):
     global historico_en_memoria
@@ -226,7 +198,33 @@ def predecir_entrada(open_price, high_price, low_price, close_price, volumen, sp
         return prediccion == 1
     except Exception as e:
         logging.error(f"Error prediciendo entrada: {str(e)}")
-        return True# ─── Lógica de Trading ──────────────────────────────────────────────────────
+        return True
+
+# ─── Gestión de Operaciones ─────────────────────────────────────────────────
+
+async def registrar_operacion(par, precio_entrada, cantidad, saldo_usado):
+    global operacion_activa
+    operacion_activa = {
+        "par": par,
+        "precio_entrada": precio_entrada,
+        "cantidad": cantidad,
+        "saldo_usado": saldo_usado,
+        "hora": datetime.datetime.now(),
+        "mejor_precio": precio_entrada
+    }
+
+async def limpiar_operacion():
+    global operacion_activa
+    operacion_activa = None
+
+async def actualizar_estadisticas(porcentaje_ganancia):
+    global operaciones_hoy, ganancia_total_hoy, historial_operaciones
+    operaciones_hoy += 1
+    ganancia_total_hoy += porcentaje_ganancia
+    historial_operaciones.append(porcentaje_ganancia)
+    if len(historial_operaciones) > 50:
+        historial_operaciones.pop(0)
+    entrenar_modelo()# ─── Lógica de Trading ──────────────────────────────────────────────────────
 
 async def operar():
     global _last_balance
@@ -344,120 +342,4 @@ def calcular_kelly_ratio():
 
     kelly = (b * p - q) / b
 
-    return max(0.1, min(kelly, 0.9))# ─── Sistema de Alertas de Volumen Anormal ──────────────────────────────────
-
-async def inicializar_volumenes():
-    global volumen_anterior
-    for par in pares:
-        simbolo = par.replace("/", "-")
-        try:
-            ticker = await asyncio.to_thread(kucoin.get_ticker, symbol=simbolo)
-            volumen = float(ticker.get('volValue', 0))
-            volumen_anterior[par] = volumen
-        except Exception as e:
-            logging.error(f"Error inicializando volumen de {par}: {str(e)}")
-            volumen_anterior[par] = 0.0
-
-async def escanear_volumenes():
-    global volumen_anterior
-    await inicializar_volumenes()
-
-    while True:
-        try:
-            for par in pares:
-                simbolo = par.replace("/", "-")
-                ticker = await asyncio.to_thread(kucoin.get_ticker, symbol=simbolo)
-                volumen_actual = float(ticker.get('volValue', 0))
-
-                volumen_ant = volumen_anterior.get(par, 0.0)
-                if volumen_ant == 0.0:
-                    volumen_anterior[par] = volumen_actual
-                    continue
-
-                incremento = ((volumen_actual - volumen_ant) / volumen_ant) * 100
-
-                if incremento >= 500:
-                    await bot.send_message(CHAT_ID,
-                        f"🚨 *ALERTA de Volumen Anormal*\n\n"
-                        f"Par: {par}\n"
-                        f"Incremento: +{incremento:.2f}%\n"
-                        f"Acción: Monitorear posible oportunidad.",
-                        parse_mode="Markdown"
-                    )
-
-                volumen_anterior[par] = volumen_actual
-
-            await asyncio.sleep(60)
-
-        except Exception as e:
-            logging.error(f"Error en escaneo de volumen: {str(e)}")
-            await asyncio.sleep(60)
-
-# ─── Comandos de Telegram ───────────────────────────────────────────────────
-
-@dp.message(Command("start"))
-async def cmd_start(message: types.Message):
-    await message.answer(
-        "✅ *ZafroBot PRO Scalper Inteligente* iniciado.\n\nSelecciona una opción:",
-        reply_markup=keyboard,
-        parse_mode="Markdown"
-    )
-
-@dp.message(lambda m: m.text == "🚀 Encender Bot")
-async def cmd_encender(message: types.Message):
-    global bot_encendido
-    if not bot_encendido:
-        bot_encendido = True
-        await message.answer("🟢 Bot encendido. Analizando mercado…")
-        asyncio.create_task(operar())
-    else:
-        await message.answer("⚠️ El bot ya está encendido.")
-
-@dp.message(lambda m: m.text == "🛑 Apagar Bot")
-async def cmd_apagar(message: types.Message):
-    global bot_encendido
-    bot_encendido = False
-    await message.answer("🔴 Bot apagado.")
-
-@dp.message(lambda m: m.text == "📊 Estado del Bot")
-async def cmd_estado(message: types.Message):
-    estado = "🟢 Encendido" if bot_encendido else "🔴 Apagado"
-    await message.answer(f"📊 Estado actual: {estado}")
-
-@dp.message(lambda m: m.text == "💰 Actualizar Saldo")
-async def cmd_actualizar_saldo(message: types.Message):
-    balance = await obtener_balance()
-    await message.answer(f"💰 Saldo disponible: {balance:.2f} USDT")
-
-@dp.message(lambda m: m.text == "📈 Estado de Orden Actual")
-async def cmd_estado_orden(message: types.Message):
-    if operacion_activa is None:
-        await message.answer("⚠️ No hay operaciones abiertas en este momento.")
-    else:
-        par = operacion_activa["par"]
-        precio_entrada = operacion_activa["precio_entrada"]
-        cantidad = operacion_activa["cantidad"]
-        saldo_usado = operacion_activa["saldo_usado"]
-        precio_actual = await asyncio.to_thread(obtener_precio, par)
-
-        porcentaje_cambio = ((precio_actual - precio_entrada) / precio_entrada) * 100
-
-        estado = "🟢 En Ganancia" if porcentaje_cambio > 0 else "🔴 En Pérdida"
-
-        await message.answer(
-            f"📈 Estado de Orden Actual:\n\n"
-            f"Par: {par}\n"
-            f"Precio Entrada: {precio_entrada:.8f}\n"
-            f"Precio Actual: {precio_actual:.8f}\n"
-            f"{estado}: {porcentaje_cambio:.2f}%\n"
-            f"Saldo Invertido: {saldo_usado:.2f} USDT"
-        )
-
-# ─── Lanzamiento Final ──────────────────────────────────────────────────────
-
-async def main():
-    asyncio.create_task(escanear_volumenes())
-    await dp.start_polling(bot)
-
-if __name__ == "__main__":
-    asyncio.run(main())
+    return max(0.1, min(kelly, 0.9))
