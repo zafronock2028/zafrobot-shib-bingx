@@ -111,11 +111,11 @@ async def loop_operaciones():
                     break
 
                 try:
-                    ticker = market_client.get_ticker(par)
-                    logging.debug(f"Ticker recibido: {ticker}")
+                    ticker = market_client.get_24h_stats(par)
+                    logging.debug(f"Stats recibidas: {ticker}")
 
-                    volumen_24h = float(ticker.get('volValue') or ticker.get('vol') or 0)
-                    precio_actual = float(ticker.get('price') or 0)
+                    volumen_24h = float(ticker.get('volValue', 0))
+                    precio_actual = float(ticker.get('last', 0))
 
                     if volumen_24h == 0 or precio_actual == 0:
                         logging.warning(f"⚠️ Datos no válidos para {par}")
