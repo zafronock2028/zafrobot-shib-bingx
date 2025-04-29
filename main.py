@@ -72,11 +72,11 @@ async def comandos_principales(message: types.Message):
         if operacion_activa:
             estado = "GANANCIA ✅" if operacion_activa["ganancia"] >= 0 else "PÉRDIDA ❌"
             await message.answer(
-                f"📈 Operación activa en {operacion_activa['par']}\n"
-                f"Entrada: {operacion_activa['entrada']:.6f} USDT\n"
-                f"Actual: {operacion_activa['actual']:.6f} USDT\n"
-                f"Ganancia: {operacion_activa['ganancia']:.6f} USDT ({estado})"
-            )
+    f"📈 Operación activa en {operacion_activa['par']}\n"
+    f"Entrada: {operacion_activa['entrada']:.6f} USDT\n"
+    f"Actual: {operacion_activa['actual']:.6f} USDT\n"
+    f"Ganancia: {operacion_activa['ganancia']:.6f} USDT ({estado})"
+)  # <- Este paréntesis de cierre es el que falta
         else:
             await message.answer("⚠️ No hay operaciones activas actualmente.")
 
