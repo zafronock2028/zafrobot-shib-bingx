@@ -100,37 +100,37 @@ async def loop_operaciones():
     global bot_encendido, operacion_activa
 
     while bot_encendido:
-    try:
-        saldo = obtener_saldo_disponible()
-        if saldo < 5:
-            logging.warning("Saldo insuficiente para operar")
-            await asyncio.sleep(10)
+        try:
+            saldo = obtener_saldo_disponible()
+            if saldo < 5:
+                logging.warning("Saldo insuficiente para operar.")
+                await asyncio.sleep(10)
+                continue
+
+            for par in pares:
+                if operacion_activa:
+                    break  # Solo una operación activa a la vez
+
+                ticker = market_client.get_ticker(par)
+                volumen_24h = float(ticker.get('volValue', 0))
+                precio_actual = float(ticker["price"])
+                logging.info(f"Analizando {par} | Volumen 24h: {volumen_24h}")
+
+                porcentaje_inversion = 0.8 if volumen_24h > 100000 else 0.5
+                monto_usar = saldo * porcentaje_inversion
+                monto_maximo_volumen = volumen_24h * 0.04
+                monto_final = min(monto_usar, monto_maximo_volumen)
+                logging.info(f"➡️ Monto a usar en {par}: {monto_final} USDT")
+
+                if monto_final < 5:
+                    continue  # Muy poco monto para operar
+
+                # Aquí seguiría tu análisis de velas...
+        
+        except Exception as e:
+            logging.error(f"Error general en loop_operaciones: {e}")
+            await asyncio.sleep(5)
             continue
-
-        for par in pares:
-            if operacion_activa:
-                break  # Solo una operación activa a la vez
-
-            ticker = market_client.get_ticker(par)
-            volumen_24h = float(ticker.get('volValue', 0))
-            precio_actual = float(ticker["price"])
-            logging.info(f"Analizando {par} | Volumen 24h: {volumen_24h} | Precio actual: {precio_actual}")
-
-            porcentaje_inversion = 0.8 if volumen_24h > 100000 else 0.5
-            monto_usar = saldo * porcentaje_inversion
-            monto_maximo_volumen = volumen_24h * 0.04
-            monto_final = min(monto_usar, monto_maximo_volumen)
-            logging.info(f"➡️ Monto a usar en {par}: {monto_final} USDT (máx por volumen: {monto_maximo_volumen})")
-
-            if monto_final < 5:
-                continue  # Muy poco monto para operar
-
-            # Aquí seguirá el análisis de velas...
-
-    except Exception as e:
-    logging.error(f"Error general en loop_operaciones: {e}")
-    await asyncio.sleep(5)
-    continue
 
             for par in pares:
                 if operacion_activa:
