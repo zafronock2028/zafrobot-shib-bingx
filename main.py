@@ -1,5 +1,3 @@
-# main.py
-
 import os
 import asyncio
 import logging
@@ -78,9 +76,12 @@ async def comandos_principales(message: types.Message):
         if operacion_activa:
             estado = "GANANCIA ✅" if operacion_activa["ganancia"] >= 0 else "PÉRDIDA ❌"
             await message.answer(
-                f"📈 Operación activa en {operacion_activa['par']}\n"
-                f"Entrada: {operacion_activa['entrada']:.6f} USDT\n"
-                f"Actual: {operacion_activa['actual']:.6f} USDT\n"
+                f"📈 Operación activa en {operacion_activa['par']}
+"
+                f"Entrada: {operacion_activa['entrada']:.6f} USDT
+"
+                f"Actual: {operacion_activa['actual']:.6f} USDT
+"
                 f"Ganancia: {operacion_activa['ganancia']:.6f} USDT ({estado})"
             )
         else:
@@ -109,7 +110,7 @@ async def loop_operaciones():
 
             for par in pares:
                 if operacion_activa:
-                    break  # Solo una operación activa a la vez
+                    break
 
                 ticker = market_client.get_ticker(par)
                 volumen_24h = float(ticker.get('volValue', 0))
@@ -123,9 +124,8 @@ async def loop_operaciones():
                 logging.info(f"➡️ Monto a usar en {par}: {monto_final}")
 
                 if monto_final < 5:
-                    continue  # Muy poco monto para operar
+                    continue
 
-                # Análisis de oportunidad simple
                 velas = market_client.get_kline(par, "1min", 5)
                 precios = [float(v[2]) for v in velas]
                 promedio_precio = sum(precios) / len(precios)
@@ -138,13 +138,21 @@ async def loop_operaciones():
                         size=str(cantidad)
                     )
                     logging.info(f"Comprado {cantidad} de {par} a {precio_actual}")
-                    operacion_activa = True
+                    operacion_activa = {
+                        "par": par,
+                        "entrada": precio_actual,
+                        "cantidad": cantidad,
+                        "actual": precio_actual,
+                        "ganancia": 0.0
+                    }
+                    await monitorear_salida()
                     break
 
         except Exception as e:
-    logging.error(f"Error general en loop_operaciones: {e}")
-    await asyncio.sleep(5)
-    continue
+            logging.error(f"Error general en loop_operaciones: {e}")
+            await asyncio.sleep(5)
+            continue
+
         await asyncio.sleep(2)
 
 # ─── Monitoreo de Salida con Trailing Stop ───
