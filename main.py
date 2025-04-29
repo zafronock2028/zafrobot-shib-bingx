@@ -38,7 +38,16 @@ async def obtener_saldo():
         return 0.0
     except KucoinAPIException as e:
         logging.error(f"Error de API al obtener saldo: {e}")
-        return 0.0
+        return 0.0async def calcular_monto_operacion(client, par, saldo_disponible):
+    try:
+        ticker = await client.get_ticker(par)
+        volumen_24h_usdt = float(ticker['volValue'])  # volumen de 24h en USDT
+        max_monto = volumen_24h_usdt * 0.04  # máximo 4% del volumen
+        monto_operacion = min(saldo_disponible, max_monto)
+        return monto_operacion
+    except Exception as e:
+        logging.error(f"Error al calcular monto de operación: {e}")
+        return saldo_disponible * 0.05
     except Exception as e:
         logging.error(f"Error general al obtener saldo: {e}")
         return 0.0
