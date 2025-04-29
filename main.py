@@ -114,11 +114,11 @@ async def loop_operaciones():
                     logging.debug(f"Ticker recibido: {ticker}")
 
                     # Validación segura de datos
-                    volumen_24h = float(ticker.get('volValue') or 0)
+                    volumen_24h = float(ticker.get('volValue') or ticker.get('vol') or 0)
                     precio_actual = float(ticker.get('price') or 0)
 
                     if volumen_24h == 0 or precio_actual == 0:
-                        logging.warning(f"⚠️ Datos no válidos para {par}. Saltando.")
+                        logging.warning(f"⚠️ Datos no válidos para {par}")
                         continue
 
                     logging.info(f"Analizando {par} | Volumen 24h: {volumen_24h}")
@@ -133,9 +133,9 @@ async def loop_operaciones():
                         continue
 
                     velas = market_client.get_kline(par, "1min", 5)
-                    precios = [float(v[2]) for v in velas if len(v) > 2]
+                    precios = [float(v[2]) for v in velas]
                     if not precios:
-                        logging.warning(f"⚠️ Velas vacías o inválidas para {par}.")
+                        logging.warning(f"⚠️ Velas vacías para {par}")
                         continue
 
                     promedio_precio = sum(precios) / len(precios)
@@ -159,7 +159,7 @@ async def loop_operaciones():
                         break
 
                 except Exception as e:
-                    logging.error(f"Error procesando {par}: {e}")
+                    logging.error(f"Error procesando par {par}: {e}")
                     continue
 
         except Exception as e:
@@ -168,7 +168,6 @@ async def loop_operaciones():
             continue
 
         await asyncio.sleep(2)
-
 # ─── Monitoreo de Salida con Trailing Stop ───
 async def monitorear_salida():
     global operacion_activa
