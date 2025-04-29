@@ -1,7 +1,7 @@
 import os
 import asyncio
 import logging
-from kucoin.client import User as UserClient
+from kucoin.client import User as UserClient, Market as MarketClient
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
@@ -18,8 +18,9 @@ API_PASSPHRASE = os.getenv("API_PASSPHRASE")
 # Token del Bot de Telegram
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
-# Crear cliente de KuCoin
+# Crear clientes de KuCoin
 client = UserClient(API_KEY, SECRET_KEY, API_PASSPHRASE)
+market = MarketClient()
 
 # Crear Bot
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
@@ -33,12 +34,15 @@ keyboard = ReplyKeyboardMarkup(keyboard=[
     [KeyboardButton(text="📊 Estado Bot")]
 ], resize_keyboard=True)
 
+# Variable para controlar el encendido del bot
 bot_encendido = False
+
+# Lista de pares a monitorear
 pares = ["SHIB-USDT", "PEPE-USDT", "FLOKI-USDT", "DOGE-USDT"]
 
 @dp.message(Command("start"))
 async def start(message: types.Message):
-    await message.answer("¡Bienvenido al Zafrobot Dinámico Pro Scalping!", reply_markup=keyboard)
+    await message.answer("¡Bienvenido al Zafrobot Dinámico Pro Scalping SHIB/USDT!", reply_markup=keyboard)
 
 @dp.message()
 async def manejar_mensajes(message: types.Message):
@@ -52,15 +56,18 @@ async def manejar_mensajes(message: types.Message):
             asyncio.create_task(iniciar_operacion())
         else:
             await message.answer("⚠️ El bot ya está encendido.")
+
     elif texto == "🛑 Apagar Bot":
         if bot_encendido:
             bot_encendido = False
             await message.answer("🛑 Bot apagado manualmente.")
         else:
             await message.answer("⚠️ El bot ya está apagado.")
+
     elif texto == "💰 Saldo":
         saldo = obtener_saldo()
         await message.answer(f"💰 Tu saldo disponible es: {saldo:.2f} USDT")
+
     elif texto == "📊 Estado Bot":
         estado = "ENCENDIDO ✅" if bot_encendido else "APAGADO 🛑"
         await message.answer(f"📊 Estado actual del bot: {estado}")
@@ -71,33 +78,29 @@ async def iniciar_operacion():
         try:
             for par in pares:
                 await analizar_par(par)
-            await asyncio.sleep(60)
+            await asyncio.sleep(2)  # Escaneo cada 2 segundos
         except Exception as e:
-            logging.error(f"Error general en operación: {e}")
-            await asyncio.sleep(60)
+            logging.error(f"Error en operación general: {e}")
+            await asyncio.sleep(5)
 
 async def analizar_par(par):
     try:
-        klines = client.get_kline_data(par, kline_type='1min', limit=5)
-        precios = [float(k[2]) for k in klines]
+        klines = market.get_kline_data(symbol=par, kline_type='1min', limit=5)
+        precios = [float(k[2]) for k in klines]  # Precio de cierre
         promedio = sum(precios) / len(precios)
-        ticker = client.get_ticker(par)
+
+        # Obtener precio actual
+        ticker = market.get_ticker(symbol=par)
         precio_actual = float(ticker['price'])
 
+        # Estrategia simple: precio actual 1% abajo del promedio = oportunidad
         if precio_actual < promedio * 0.99:
             logging.info(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Oportunidad detectada en {par}: Precio actual {precio_actual:.6f}, Promedio {promedio:.6f}")
-            # ejecutar orden de compra aquí
+            # Aquí luego vamos a programar la orden de compra real
         else:
             logging.info(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {par}: Sin oportunidad. Precio actual {precio_actual:.6f}, Promedio {promedio:.6f}")
     except Exception as e:
         logging.error(f"Error analizando {par}: {e}")
-
-async def monitorear_orden():
-    try:
-        # Aquí irá la lógica para monitorear las órdenes
-        pass
-    except Exception as e:
-        logging.error(f"Error al monitorear orden: {e}")
 
 def obtener_saldo():
     try:
@@ -110,6 +113,7 @@ def obtener_saldo():
     return 0.0
 
 async def main():
+    logging.basicConfig(level=logging.INFO)
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
