@@ -30,7 +30,6 @@ operacion_activa = None
 pares = ["SHIB-USDT", "PEPE-USDT", "FLOKI-USDT", "DOGE-USDT"]
 trailing_stop_pct = -0.08
 
-# ─── Teclado Telegram ───
 keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🚀 Encender Bot")],
@@ -42,7 +41,6 @@ keyboard = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
-# ─── Comandos ───
 @dp.message(Command("start"))
 async def start(message: types.Message):
     await message.answer("✅ ¡Bienvenido al Zafrobot Dinámico Pro Scalping!", reply_markup=keyboard)
@@ -83,7 +81,6 @@ async def comandos(message: types.Message):
         else:
             await message.answer("⚠️ No hay operaciones activas actualmente.")
 
-# ─── Funciones ───
 def obtener_saldo_disponible():
     try:
         cuentas = user_client.get_account_list()
@@ -109,11 +106,11 @@ async def loop_operaciones():
                     break
 
                 try:
-                    ticker = market_client.get_ticker(par)
-                    logging.debug(f"TICKER DEBUG para {par}: {ticker}")
+                    stats = market_client.get_24h_stats(par)
+                    precio_actual = float(stats.get("last") or 0)
+                    volumen_24h = float(stats.get("volValue") or 0)
 
-                    volumen_24h = float(ticker.get('volValue') or ticker.get('vol') or 0)
-                    precio_actual = float(ticker.get('price') or 0)
+                    logging.debug(f"STATS DEBUG {par}: {stats}")
 
                     if volumen_24h == 0 or precio_actual == 0:
                         logging.warning(f"⚠️ Datos no válidos para {par}")
@@ -166,7 +163,6 @@ async def loop_operaciones():
 
         await asyncio.sleep(1)
 
-# ─── Monitoreo de Salida con Trailing Stop ───
 async def monitorear_salida():
     global operacion_activa
     precio_max = operacion_activa["entrada"]
@@ -201,7 +197,6 @@ async def monitorear_salida():
 
         await asyncio.sleep(2)
 
-# ─── Iniciar bot ───
 async def main():
     await dp.start_polling(bot)
 
