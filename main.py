@@ -110,10 +110,10 @@ async def loop_operaciones():
 
                 try:
                     ticker = market_client.get_ticker(par)
-                    logging.debug(f"Ticker recibido: {ticker}")
+                    logging.warning(f"TICKER DEBUG para {par}: {ticker}")
 
-                    volumen_24h = float(ticker.get('volValue') or ticker.get('vol') or 0)
-                    precio_actual = float(ticker.get('price') or 0)
+                    volumen_24h = float(ticker.get('volValue', 0)) or float(ticker.get('vol', 0))
+                    precio_actual = float(ticker.get('price', 0))
 
                     if volumen_24h == 0 or precio_actual == 0:
                         logging.warning(f"⚠️ Datos no válidos para {par}")
@@ -129,8 +129,8 @@ async def loop_operaciones():
                     if monto_final < 5:
                         continue
 
-                    velas = market_client.get_kline(symbol=par, kline_type="1min")
-                    precios = [float(v[2]) for v in velas[:5]]
+                    velas = market_client.get_kline(par, "1min", 5)
+                    precios = [float(v[2]) for v in velas]
                     if not precios:
                         logging.warning(f"⚠️ Velas vacías para {par}")
                         continue
