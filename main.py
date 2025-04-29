@@ -7,7 +7,6 @@ import aiohttp
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
-from aiogram import executor
 from kucoin.client import User as UserClient
 from kucoin.client import Market as MarketClient
 
@@ -30,6 +29,7 @@ dp = Dispatcher(bot)
 pares = ['SHIB-USDT', 'PEPE-USDT', 'FLOKI-USDT', 'BONK-USDT']
 operacion_en_curso = False
 saldo_actual = 0.0
+
 TRAILING_STOP_PERCENT = 8  # Trailing Stop de -8%
 
 # --- Bloque 4: Funciones utilitarias ---
@@ -57,7 +57,7 @@ async def calcular_monto_operacion(par):
         monto_operacion = min(saldo_actual, max_monto)
         return monto_operacion
     except Exception as e:
-        logging.error(f"Error al calcular monto de operaciÃ³n: {e}")
+        logging.error(f"Error al calcular monto de operación: {e}")
         return saldo_actual * 0.05
 
 async def obtener_volumen_24h(par):
@@ -73,102 +73,114 @@ def calcular_kelly(win_rate, reward_risk_ratio):
 
 # --- Teclado personalizado ---
 menu_principal = ReplyKeyboardMarkup(resize_keyboard=True)
-menu_principal.add(KeyboardButton('ð Encender Bot'))
-menu_principal.add(KeyboardButton('ð Estado del Bot'))
-menu_principal.add(KeyboardButton('ð Estado de Orden'))
+menu_principal.add(KeyboardButton('🚀 Encender Bot'))
+menu_principal.add(KeyboardButton('📈 Estado del Bot'))
+menu_principal.add(KeyboardButton('📋 Estado de la Orden'))
 
-# --- Comandos bÃ¡sicos ---
+# --- Comandos básicos ---
 @dp.message_handler(commands=['start'])
 async def start_command(message: types.Message):
-    await message.answer("â ZafroBot Scalper PE listo para operar.", reply_markup=menu_principal)
+    await message.answer("✅ ZafroBot Scalper Pro Activo", reply_markup=menu_principal)
 
-@dp.message_handler(lambda message: message.text == "ð Estado del Bot")
+@dp.message_handler(lambda message: message.text == '📈 Estado del Bot')
 async def estado_bot(message: types.Message):
-    estado = "Activo" if operacion_en_curso else "Apagado"
-    await message.answer(f"ð Estado actual del bot: {estado}")
+    estado = "Activo" if operacion_en_curso else "Inactivo"
+    await message.answer(f"📊 Estado del Bot: {estado}")
 
-@dp.message_handler(lambda message: message.text == "ð Estado de Orden")
+@dp.message_handler(lambda message: message.text == '📋 Estado de la Orden')
 async def estado_orden_actual(message: types.Message):
-    await message.answer("ð FunciÃ³n de Estado de Orden activa.")
+    await message.answer("📋 Función de Estado de Orden aún en desarrollo.")
 
-@dp.message_handler(lambda message: message.text == "ð Encender Bot")
+@dp.message_handler(lambda message: message.text == '🚀 Encender Bot')
 async def encender_bot(message: types.Message):
-    global operacion_en_curso
+    global operacion_en_curso, saldo_actual
+    saldo_actual = await obtener_saldo()
+    if saldo_actual < 5:
+        await message.answer("⚠️ Saldo insuficiente para operar.")
+        return
     operacion_en_curso = True
-    await message.answer("ð¢ Bot encendido. Escaneando mercado...")
+    await message.answer(f"✅ Bot encendido. Saldo disponible: {saldo_actual} USDT")
     asyncio.create_task(escaneo_mercado())
 
-# --- Escaneo y operaciones ---
-async def escaneo_mercado():
+@dp.message_handler(commands=['stop'])
+async def apagar_bot(message: types.Message):
     global operacion_en_curso
-    global saldo_actual
+    operacion_en_curso = False
+    await message.answer("🔴 Bot apagado manualmente.")
 
+# --- Lanzador de AIOgram ---
+if __name__ == '__main__':
+    from aiogram import executor
+    executor.start_polling(dp, skip_updates=True)
+
+# --- Función principal de escaneo ---
+async def escaneo_mercado():
+    global operacion_en_curso, saldo_actual
     while operacion_en_curso:
         try:
             for par in pares:
                 saldo_actual = await obtener_saldo()
                 if saldo_actual < 5:
-                    logging.warning(f"â ï¸ Saldo insuficiente ({saldo_actual} USDT). Esperando...")
+                    logging.warning("⚠️ Saldo insuficiente.")
                     await asyncio.sleep(10)
                     continue
 
                 volumen_24h = await obtener_volumen_24h(par)
                 if volumen_24h is None:
-                    logging.warning(f"â ï¸ No se pudo obtener volumen para {par}")
+                    logging.warning("⚠️ No se pudo obtener volumen.")
                     continue
 
                 monto_operacion = min(saldo_actual, volumen_24h * 0.04)
                 if monto_operacion < 5:
-                    logging.warning(f"â ï¸ Monto de operaciÃ³n muy pequeÃ±o ({monto_operacion} USDT).")
+                    logging.warning("⚠️ Monto de operación muy pequeño.")
                     continue
 
                 ticker = await client.get_ticker(par)
                 precio_actual = float(ticker['price'])
-                precio_compra = precio_actual
-                precio_objetivo = precio_compra * 1.015
 
+                precio_entrada = precio_actual
+                stop_loss = calcular_trailing_stop(precio_entrada)
+
+                # Ejecutar compra
                 orden_compra = await client.create_market_order(
                     symbol=par,
                     side='buy',
-                    size=round(monto_operacion / precio_actual, 5)
+                    size=round(monto_operacion / precio_actual, 2)
                 )
-                logging.info(f"â Compra ejecutada: {orden_compra}")
+                logging.info(f"✅ Compra ejecutada en {par}")
 
                 await bot.send_message(
                     CHAT_ID,
-                    f"â COMPRA ejecutada en {par}
-"
-                    f"Precio: {precio_compra:.6f}
-"
-                    f"Objetivo de Venta: {precio_objetivo:.6f}"
+                    f"✅ COMPRA ejecutada en {par}"
                 )
 
-                await gestionar_salida(par, precio_compra, precio_objetivo)
-                break
-
-            await asyncio.sleep(5)
+                await gestionar_salida(par, precio_entrada)
 
         except Exception as e:
-            logging.error(f"â Error crÃ­tico en escaneo de mercado: {e}")
-            await asyncio.sleep(10)
+            logging.error(f"❌ Error en escaneo de mercado: {e}")
 
-async def gestionar_salida(par, precio_entrada, precio_objetivo):
+        await asyncio.sleep(5)
+
+# --- Función para gestionar salida (venta) ---
+async def gestionar_salida(par, precio_entrada):
     global operacion_en_curso
     stop_loss = calcular_trailing_stop(precio_entrada)
-
     try:
         while operacion_en_curso:
             ticker = await client.get_ticker(par)
             precio_actual = float(ticker['price'])
 
-            if precio_actual >= precio_objetivo:
+            if precio_actual >= precio_entrada * 1.015:
                 await client.create_market_order(
                     symbol=par,
                     side='sell',
-                    size=round(await obtener_saldo() / precio_actual, 5)
+                    size=round(await obtener_balance_simbolo(par), 2)
                 )
-                logging.info(f"â Venta ejecutada objetivo en {par}.")
-                await bot.send_message(CHAT_ID, f"â VENTA ejecutada en {par} alcanzando objetivo.")
+                logging.info(f"✅ Venta ejecutada (Objetivo alcanzado) {par}")
+                await bot.send_message(
+                    CHAT_ID,
+                    f"✅ VENTA ejecutada en {par} (Ganancia alcanzada)"
+                )
                 operacion_en_curso = False
                 break
 
@@ -176,20 +188,30 @@ async def gestionar_salida(par, precio_entrada, precio_objetivo):
                 await client.create_market_order(
                     symbol=par,
                     side='sell',
-                    size=round(await obtener_saldo() / precio_actual, 5)
+                    size=round(await obtener_balance_simbolo(par), 2)
                 )
-                logging.info(f"â ï¸ Venta ejecutada por Trailing Stop en {par}.")
-                await bot.send_message(CHAT_ID, f"â ï¸ VENTA ejecutada por Trailing Stop en {par}.")
+                logging.info(f"⚠️ Venta ejecutada por Trailing Stop {par}")
+                await bot.send_message(
+                    CHAT_ID,
+                    f"⚠️ VENTA ejecutada en {par} (Trailing Stop)"
+                )
                 operacion_en_curso = False
                 break
 
             await asyncio.sleep(5)
 
     except Exception as e:
-        logging.error(f"â Error en gestiÃ³n de salida: {e}")
-        operacion_en_curso = False
+        logging.error(f"❌ Error en gestión de salida: {e}")
 
-# --- Lanzador de AIOgram ---
-if __name__ == '__main__':
-    logging.basicConfig(level=logging.INFO)
-    executor.start_polling(dp, skip_updates=True)
+# --- Función para obtener balance del par ---
+async def obtener_balance_simbolo(par):
+    try:
+        symbol_base = par.split('-')[0]
+        cuentas = user_client.get_account_list()
+        for cuenta in cuentas:
+            if cuenta['currency'] == symbol_base:
+                return float(cuenta['available'])
+        return 0.0
+    except Exception as e:
+        logging.error(f"Error al obtener balance de símbolo: {e}")
+        return 0.0
