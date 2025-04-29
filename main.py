@@ -134,12 +134,12 @@ async def loop_operaciones():
 
               # Solo una operación activa a la vez
 
-monto_maximo_volumen = volumen_24h * 0.04
-monto_final = min(monto_usar, monto_maximo_volumen)
-logging.info(f"➡ Monto a usar en {par}: {monto_final} USDT (máx por volumen: {monto_maximo_volumen})")
+        monto_maximo_volumen = volumen_24h * 0.04
+        monto_final = min(monto_usar, monto_maximo_volumen)
+        logging.info(f"➡️ Monto a usar en {par}: {monto_final:.2f} USDT")
 
-                if monto_final < 5:
-                    continue  # Muy poco monto para operar
+        if monto_final < 5:
+            continue  # Muy poco monto para operar
 
                 # Análisis de oportunidad simple
                 velas = market_client.get_kline(par, "1min", 5)
