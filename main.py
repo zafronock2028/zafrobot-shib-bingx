@@ -1,7 +1,6 @@
 import os
 import asyncio
 import logging
-from datetime import datetime
 from kucoin.client import Market, Trade, User
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
@@ -75,13 +74,12 @@ async def comandos_principales(message: types.Message):
     elif message.text == "📈 Estado de Orden Actual":
         if operacion_activa:
             estado = "GANANCIA ✅" if operacion_activa["ganancia"] >= 0 else "PÉRDIDA ❌"
-            texto = (
+            await message.answer(
                 f"📈 Operación activa en {operacion_activa['par']}\n"
                 f"Entrada: {operacion_activa['entrada']:.6f} USDT\n"
                 f"Actual: {operacion_activa['actual']:.6f} USDT\n"
                 f"Ganancia: {operacion_activa['ganancia']:.6f} USDT ({estado})"
             )
-            await message.answer(texto)
         else:
             await message.answer("⚠️ No hay operaciones activas actualmente.")
 
@@ -111,11 +109,11 @@ async def loop_operaciones():
                     break
 
                 try:
-                    ticker = market_client.get_24h_stats(par)
-                    logging.debug(f"Stats recibidas: {ticker}")
+                    ticker = market_client.get_ticker(par)
+                    logging.debug(f"Ticker recibido: {ticker}")
 
-                    volumen_24h = float(ticker.get('volValue', 0))
-                    precio_actual = float(ticker.get('last', 0))
+                    volumen_24h = float(ticker.get('volValue') or ticker.get('vol') or 0)
+                    precio_actual = float(ticker.get('price') or 0)
 
                     if volumen_24h == 0 or precio_actual == 0:
                         logging.warning(f"⚠️ Datos no válidos para {par}")
@@ -131,8 +129,8 @@ async def loop_operaciones():
                     if monto_final < 5:
                         continue
 
-                    velas = market_client.get_kline(par, "1min", 5)
-                    precios = [float(v[2]) for v in velas]
+                    velas = market_client.get_kline(symbol=par, kline_type="1min")
+                    precios = [float(v[2]) for v in velas[:5]]
                     if not precios:
                         logging.warning(f"⚠️ Velas vacías para {par}")
                         continue
