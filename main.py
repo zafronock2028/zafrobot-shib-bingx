@@ -76,9 +76,12 @@ async def comandos_principales(message: types.Message):
         if operacion_activa:
             estado = "GANANCIA ✅" if operacion_activa["ganancia"] >= 0 else "PÉRDIDA ❌"
             await message.answer(
-                f"📈 Operación activa en {operacion_activa['par']}\n"
-                f"Entrada: {operacion_activa['entrada']:.6f} USDT\n"
-                f"Actual: {operacion_activa['actual']:.6f} USDT\n"
+                f"📈 Operación activa en {operacion_activa['par']}
+"
+                f"Entrada: {operacion_activa['entrada']:.6f} USDT
+"
+                f"Actual: {operacion_activa['actual']:.6f} USDT
+"
                 f"Ganancia: {operacion_activa['ganancia']:.6f} USDT ({estado})"
             )
         else:
@@ -105,25 +108,25 @@ async def loop_operaciones():
                 await asyncio.sleep(10)
                 continue
 
-                    for par in pares:
-            if operacion_activa:
-                break  # Solo una operación activa a la vez
+            for par in pares:
+                if operacion_activa:
+                    break  # Solo una operación activa a la vez
 
-            ticker = market_client.get_ticker(par)
-            logging.debug(ticker)  # Mostramos todo el contenido recibido
+                ticker = market_client.get_ticker(par)
+                logging.debug(ticker)  # Mostramos todo el contenido recibido
 
-            volumen_24h = float(ticker.get('volValue') or ticker.get('vol') or 0)
-            precio_actual = float(ticker.get('price', 0))
-            logging.info(f"Analizando {par} | Volumen 24h: {volumen_24h}")
+                volumen_24h = float(ticker.get('volValue') or ticker.get('vol') or 0)
+                precio_actual = float(ticker.get('price', 0))
+                logging.info(f"Analizando {par} | Volumen 24h: {volumen_24h}")
 
-            porcentaje_inversion = 0.8 if volumen_24h > 100000 else 0.5
-            monto_usar = saldo * porcentaje_inversion
-            monto_maximo_volumen = volumen_24h * 0.04
-            monto_final = min(monto_usar, monto_maximo_volumen)
-            logging.info(f"➡️ Monto a usar en {par}: {monto_final}")
+                porcentaje_inversion = 0.8 if volumen_24h > 100000 else 0.5
+                monto_usar = saldo * porcentaje_inversion
+                monto_maximo_volumen = volumen_24h * 0.04
+                monto_final = min(monto_usar, monto_maximo_volumen)
+                logging.info(f"➡️ Monto a usar en {par}: {monto_final}")
 
-            if monto_final < 5:
-                continue
+                if monto_final < 5:
+                    continue
 
                 velas = market_client.get_kline(par, "1min", 5)
                 precios = [float(v[2]) for v in velas]
