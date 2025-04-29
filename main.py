@@ -5,7 +5,8 @@ import os
 from aiogram import Bot, Dispatcher, types
 from kucoin.client import User as UserClient
 from kucoin.client import Market as MarketClient
-from kucoin.exceptions import KucoinAPIException
+except Exception as e:
+    logging.error(f"Error: {e}")
 import aiohttp
 from dotenv import load_dotenv
 import random
