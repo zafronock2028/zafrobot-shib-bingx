@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os
 from aiogram import Bot, Dispatcher, types
-from kucoin.client import Client
+from kucoin.client import Market, Trade, User
 from kucoin.exceptions import KucoinAPIException
 import aiohttp
 from dotenv import load_dotenv
@@ -16,24 +16,28 @@ API_PASSPHRASE = os.getenv('API_PASSPHRASE')
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 CHAT_ID = os.getenv('CHAT_ID')
 
-client = Client(API_KEY, SECRET_KEY, API_PASSPHRASE)
+# Inicializar clientes de KuCoin
+market_client = Market()
+trade_client = Trade(API_KEY, SECRET_KEY, API_PASSPHRASE)
+user_client = User(API_KEY, SECRET_KEY, API_PASSPHRASE)
 
+# Inicializar bot de Telegram
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 dp = Dispatcher(bot)
 
-pares = ['SHIB-USDT', 'PEPE-USDT', 'FLOKI-USDT', 'DOGE-USDT']
+pares = ['SHIB-USDT', 'PEPE-USDT', 'FLOKI-USDT', 'BONK-USDT', '1CAT-USDT']
 operacion_en_curso = False
 saldo_actual = 0.0
 
 async def obtener_saldo():
     try:
-        cuentas = client.get_accounts()
+        cuentas = user_client.get_account_list()
         for cuenta in cuentas:
             if cuenta['currency'] == 'USDT' and cuenta['type'] == 'trade':
                 return float(cuenta['available'])
         return 0.0
     except KucoinAPIException as e:
-        logging.error(f"Error Kucoin al obtener saldo: {e}")
+        logging.error(f"Error de API al obtener saldo: {e}")
         return 0.0
     except Exception as e:
         logging.error(f"Error general al obtener saldo: {e}")
