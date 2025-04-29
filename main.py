@@ -219,4 +219,61 @@ if __name__ == '__main__':
         return 0.0
     except Exception as e:
         logging.error(f"Error al obtener balance de {par}: {e}")
-        return 0.0
+        return 0.0async def escaneo_mercado():
+    global operacion_en_curso
+    global saldo_actual
+
+    while operacion_en_curso:
+        try:
+            for par in pares:
+                # Verificar que hay saldo suficiente
+                saldo_actual = await obtener_saldo()
+                if saldo_actual < 5:
+                    logging.warning(f"⚠️ Saldo insuficiente ({saldo_actual} USDT). Esperando...")
+                    await asyncio.sleep(10)
+                    continue
+
+                # Obtener volumen de 24h
+                volumen_24h = await obtener_volumen_24h(par)
+                if volumen_24h is None:
+                    logging.warning(f"⚠️ No se pudo obtener volumen para {par}")
+                    continue
+
+                # Calcular monto de operación basado en volumen
+                monto_operacion = min(saldo_actual, volumen_24h * 0.04)
+                if monto_operacion < 5:
+                    logging.warning(f"⚠️ Monto de operación muy pequeño ({monto_operacion} USDT). Esperando...")
+                    continue
+
+                # Obtener precio actual
+                ticker = await client.get_ticker(par)
+                precio_actual = float(ticker['price'])
+
+                # Definir precios de compra y venta
+                precio_compra = precio_actual
+                precio_objetivo = precio_compra * 1.015  # Subida de 1.5%
+
+                # Ejecutar compra
+                orden_compra = await client.create_market_order(
+                    symbol=par,
+                    side='buy',
+                    size=round(monto_operacion / precio_actual, 5)
+                )
+                logging.info(f"✅ Compra ejecutada: {orden_compra}")
+
+                await bot.send_message(
+                    CHAT_ID,
+                    f"✅ COMPRA ejecutada en {par}\n"
+                    f"Precio: {precio_compra:.6f}\n"
+                    f"Objetivo de Venta: {precio_objetivo:.6f}"
+                )
+
+                # Esperar a que suba precio
+                await gestionar_salida(par, precio_compra, precio_objetivo)
+                break
+
+            await asyncio.sleep(5)
+
+        except Exception as e:
+            logging.error(f"❌ Error crítico en escaneo de mercado: {e}")
+            await asyncio.sleep(10)
