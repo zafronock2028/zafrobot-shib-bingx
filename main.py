@@ -76,9 +76,12 @@ async def comandos_principales(message: types.Message):
         if operacion_activa:
             estado = "GANANCIA ✅" if operacion_activa["ganancia"] >= 0 else "PÉRDIDA ❌"
             await message.answer(
-                f"📈 Operación activa en {operacion_activa['par']}\n"
-                f"Entrada: {operacion_activa['entrada']:.6f} USDT\n"
-                f"Actual: {operacion_activa['actual']:.6f} USDT\n"
+                f"📈 Operación activa en {operacion_activa['par']}
+"
+                f"Entrada: {operacion_activa['entrada']:.6f} USDT
+"
+                f"Actual: {operacion_activa['actual']:.6f} USDT
+"
                 f"Ganancia: {operacion_activa['ganancia']:.6f} USDT ({estado})"
             )
         else:
@@ -107,13 +110,12 @@ async def loop_operaciones():
 
             for par in pares:
                 if operacion_activa:
-                    break  # Solo una operación activa a la vez
+                    break
 
                 try:
                     ticker = market_client.get_ticker(par)
                     logging.debug(f"Ticker recibido: {ticker}")
 
-                    # Validación segura de datos
                     volumen_24h = float(ticker.get('volValue') or ticker.get('vol') or 0)
                     precio_actual = float(ticker.get('price') or 0)
 
@@ -122,7 +124,6 @@ async def loop_operaciones():
                         continue
 
                     logging.info(f"Analizando {par} | Volumen 24h: {volumen_24h}")
-
                     porcentaje_inversion = 0.8 if volumen_24h > 100000 else 0.5
                     monto_usar = saldo * porcentaje_inversion
                     monto_maximo_volumen = volumen_24h * 0.04
@@ -168,6 +169,7 @@ async def loop_operaciones():
             continue
 
         await asyncio.sleep(2)
+
 # ─── Monitoreo de Salida con Trailing Stop ───
 async def monitorear_salida():
     global operacion_activa
@@ -197,6 +199,7 @@ async def monitorear_salida():
                 )
                 operacion_activa = None
                 break
+
         except Exception as e:
             logging.error(f"Error monitoreando salida: {e}")
 
