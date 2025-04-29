@@ -105,23 +105,25 @@ async def loop_operaciones():
                 await asyncio.sleep(10)
                 continue
 
-            for par in pares:
-                if operacion_activa:
-                    break
+                    for par in pares:
+            if operacion_activa:
+                break  # Solo una operación activa a la vez
 
-                ticker = market_client.get_ticker(par)
-                volumen_24h = float(ticker.get('volValue', 0))
-                precio_actual = float(ticker["price"])
-                logging.info(f"Analizando {par} | Volumen 24h: {volumen_24h}")
+            ticker = market_client.get_ticker(par)
+            logging.debug(ticker)  # Mostramos todo el contenido recibido
 
-                porcentaje_inversion = 0.8 if volumen_24h > 100000 else 0.5
-                monto_usar = saldo * porcentaje_inversion
-                monto_maximo_volumen = volumen_24h * 0.04
-                monto_final = min(monto_usar, monto_maximo_volumen)
-                logging.info(f"➡️ Monto a usar en {par}: {monto_final}")
+            volumen_24h = float(ticker.get('volValue') or ticker.get('vol') or 0)
+            precio_actual = float(ticker.get('price', 0))
+            logging.info(f"Analizando {par} | Volumen 24h: {volumen_24h}")
 
-                if monto_final < 5:
-                    continue
+            porcentaje_inversion = 0.8 if volumen_24h > 100000 else 0.5
+            monto_usar = saldo * porcentaje_inversion
+            monto_maximo_volumen = volumen_24h * 0.04
+            monto_final = min(monto_usar, monto_maximo_volumen)
+            logging.info(f"➡️ Monto a usar en {par}: {monto_final}")
+
+            if monto_final < 5:
+                continue
 
                 velas = market_client.get_kline(par, "1min", 5)
                 precios = [float(v[2]) for v in velas]
