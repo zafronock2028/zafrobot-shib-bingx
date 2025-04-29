@@ -114,7 +114,7 @@ async def loop_operaciones():
                 ticker = market_client.get_ticker(par)
                 volumen_24h = float(ticker.get('volValue', 0))
                 precio_actual = float(ticker["price"])
-                logging.info(f"Analizando {par} | Volumen 24h: {volumen_24h}")
+                logging.info(f"Analizando {par} | Volumen 24h: {volumen_24h} | Precio: {precio_actual}")
 
                 porcentaje_inversion = 0.8 if volumen_24h > 100000 else 0.5
                 monto_usar = saldo * porcentaje_inversion
@@ -125,8 +125,8 @@ async def loop_operaciones():
                 if monto_final < 5:
                     continue  # Muy poco monto para operar
 
-                # Aquí seguiría tu análisis de velas...
-        
+                # Aquí seguirá el análisis de velas...
+
         except Exception as e:
             logging.error(f"Error general en loop_operaciones: {e}")
             await asyncio.sleep(5)
