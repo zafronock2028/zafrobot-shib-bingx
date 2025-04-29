@@ -1,20 +1,7 @@
 services:
   - type: worker
-    name: zafrobot-scalper-pro-v1
+    name: zafrobot-dinamico-pro
     env: python
-    pythonVersion: 3.10
     plan: starter
-    region: frankfurt
-    buildCommand: pip install -r requirements.txt
-    startCommand: python main.py
-    envVars:
-      - key: API_KEY
-        sync: false
-      - key: SECRET_KEY
-        sync: false
-      - key: API_PASSPHRASE
-        sync: false
-      - key: TELEGRAM_BOT_TOKEN
-        sync: false
-      - key: CHAT_ID
-        sync: false
+    buildCommand: ""
+    startCommand: "bash start.sh"
