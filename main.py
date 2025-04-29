@@ -12,6 +12,7 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
 import numpy as np
+from decimal import Decimal, ROUND_DOWN
 
 # ─── Logging ─────────────────────────────────────────────────────────────
 logging.basicConfig(level=logging.INFO)
@@ -41,7 +42,15 @@ ganancia_total_hoy = 0.0
 historial_operaciones = []
 volumen_anterior = {}
 historico_en_memoria = []
-modelo_predictor = None# ─── Teclado de Comandos ────────────────────────────────────────────────────
+modelo_predictor = None
+
+# ─── Reglas de tamaño mínimo por par ───────────────────────────────────────
+minimos_por_par = {
+    "PEPE/USDT": {"min_cantidad": 100000, "decimales": 0},
+    "FLOKI/USDT": {"min_cantidad": 100000, "decimales": 0},
+    "SHIB/USDT": {"min_cantidad": 10000, "decimales": 0},
+    "DOGE/USDT": {"min_cantidad": 1, "decimales": 2},
+}# ─── Teclado de Comandos ────────────────────────────────────────────────────
 keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🚀 Encender Bot"), KeyboardButton(text="🛑 Apagar Bot")],
@@ -71,7 +80,7 @@ async def analizar_mercado_real(par):
         volumen_bids = sum(float(bid[1]) for bid in bids[:5])
         volumen_asks = sum(float(ask[1]) for ask in asks[:5])
 
-        if spread > 0.3:  # Mejorado: permite spread hasta 0.3%
+        if spread > 0.3:
             return False
         if volumen_bids < volumen_asks:
             return False
@@ -118,13 +127,28 @@ async def obtener_balance():
 
 def obtener_precio(par):
     simbolo = par.replace("/", "-")
-    ticker = kucoin.get_ticker(symbol=simbolo)
+    ticker = kucoin.get_ticker(symbol=symbolo)
     return float(ticker["price"])
+
+def calcular_cantidad(par, saldo, precio):
+    reglas = minimos_por_par.get(par)
+    if reglas is None:
+        return 0.0
+
+    min_cantidad = reglas["min_cantidad"]
+    decimales = reglas["decimales"]
+
+    cantidad = saldo / precio
+    cantidad = Decimal(cantidad).quantize(Decimal('1.' + '0' * decimales), rounding=ROUND_DOWN)
+
+    if cantidad < min_cantidad:
+        return 0.0
+    return float(cantidad)
 
 def ejecutar_compra(par, cantidad):
     simbolo = par.replace("/", "-")
     try:
-        orden = kucoin.create_market_order(symbol=simbolo, side="buy", size=cantidad)
+        orden = kucoin.create_market_order(symbol=simbolo, side="buy", size=str(cantidad))
         return orden
     except Exception as e:
         logging.error(f"Error comprando {par}: {str(e)}")
@@ -246,7 +270,13 @@ async def operar():
 
             porcentaje_kelly = calcular_kelly_ratio()
             saldo_usar = balance * porcentaje_kelly
-            cantidad = saldo_usar / precio_open
+
+            cantidad = calcular_cantidad(par, saldo_usar, precio_open)
+
+            if cantidad <= 0:
+                await bot.send_message(CHAT_ID, f"⚠️ Saldo insuficiente para operar {par}. Esperando nueva oportunidad...")
+                await asyncio.sleep(5)
+                continue
 
             orden = await asyncio.to_thread(ejecutar_compra, par, cantidad)
             if orden:
@@ -257,7 +287,7 @@ async def operar():
             await asyncio.sleep(1)
 
         except Exception as e:
-            logging.error(f"Error general: {str(e)}")
+            logging.error(f"Error general en operar(): {str(e)}")
             await asyncio.sleep(10)
 
 async def monitorear_operacion(par, precio_entrada, cantidad):
