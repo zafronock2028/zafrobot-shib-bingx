@@ -114,59 +114,37 @@ async def loop_operaciones():
                 ticker = market_client.get_ticker(par)
                 volumen_24h = float(ticker.get('volValue', 0))
                 precio_actual = float(ticker["price"])
-                logging.info(f"Analizando {par} | Volumen 24h: {volumen_24h} | Precio: {precio_actual}")
+                logging.info(f"Analizando {par} | Volumen 24h: {volumen_24h}")
 
                 porcentaje_inversion = 0.8 if volumen_24h > 100000 else 0.5
                 monto_usar = saldo * porcentaje_inversion
                 monto_maximo_volumen = volumen_24h * 0.04
                 monto_final = min(monto_usar, monto_maximo_volumen)
-                logging.info(f"➡️ Monto a usar en {par}: {monto_final} USDT")
+                logging.info(f"➡️ Monto a usar en {par}: {monto_final}")
 
                 if monto_final < 5:
                     continue  # Muy poco monto para operar
 
-                # Aquí seguirá tu análisis de velas...
-
-        except Exception as e:
-            logging.error(f"Error general en loop_operaciones: {e}")
-            await asyncio.sleep(5)
-            continue
-
-              # Solo una operación activa a la vez
-
-        monto_maximo_volumen = volumen_24h * 0.04
-        monto_final = min(monto_usar, monto_maximo_volumen)
-        logging.info(f"➡️ Monto a usar en {par}: {monto_final:.2f} USDT")
-
-        if monto_final < 5:
-            continue  # Muy poco monto para operar
-
                 # Análisis de oportunidad simple
                 velas = market_client.get_kline(par, "1min", 5)
-                precios = [float(v[2]) for v in velas]  # Precio de cierre
+                precios = [float(v[2]) for v in velas]
                 promedio_precio = sum(precios) / len(precios)
 
-                if precio_actual < promedio_precio * 0.995:
+                if precio_actual < promedio_precio:
                     cantidad = round(monto_final / precio_actual, 2)
                     trade_client.create_market_order(
                         symbol=par,
                         side="buy",
                         size=str(cantidad)
                     )
-                    logging.info(f"✅ COMPRA en {par}: {cantidad} tokens a {precio_actual} USDT")
+                    logging.info(f"Comprado {cantidad} de {par} a {precio_actual}")
+                    operacion_activa = True
+                    break
 
-                    operacion_activa = {
-                        "par": par,
-                        "entrada": precio_actual,
-                        "cantidad": cantidad,
-                        "actual": precio_actual,
-                        "ganancia": 0.0
-                    }
-
-                    await monitorear_salida()
         except Exception as e:
-            logging.error(f"Error general: {e}")
-
+    logging.error(f"Error general en loop_operaciones: {e}")
+    await asyncio.sleep(5)
+    continue
         await asyncio.sleep(2)
 
 # ─── Monitoreo de Salida con Trailing Stop ───
