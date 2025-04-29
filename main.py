@@ -114,6 +114,14 @@ async def loop_operaciones():
                 ticker = market_client.get_ticker(par)
                 volumen_24h = float(ticker.get('volValue', 0))
                 precio_actual = float(ticker["price"])
+                logging.info(f"Analizando {par} | Volumen 24h: {volumen_24h} | Precio actual: {precio_actual}")
+
+porcentaje_inversion = 0.8 if volumen_24h > 100000 else 0.5
+monto_usar = saldo * porcentaje_inversion
+monto_maximo_volumen = volumen_24h * 0.04
+monto_final = min(monto_usar, monto_maximo_volumen)
+
+logging.info(f"→ Monto a usar en {par}: {monto_final} USDT (máx permitido por volumen)")
 
                 if volumen_24h <= 0:
                     continue
