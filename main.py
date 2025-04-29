@@ -1,52 +1,46 @@
 # main.py
+
 import os
 import asyncio
 import logging
 import datetime
 import random
-from kucoin.client import Trade
+import numpy as np
+from decimal import Decimal, ROUND_DOWN
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
-import numpy as np
-from decimal import Decimal, ROUND_DOWN
+from kucoin.client import Client
 
-# ─── Logging ─────────────────────────────────────────────────────────────
+# ─── Configuración de Logging ─────────────────────────────────────
 logging.basicConfig(level=logging.INFO)
 
-# ─── Configuración ─────────────────────────────────────────────────────────
+# ─── Credenciales desde Entorno ───────────────────────────────────
 API_KEY = os.getenv("API_KEY")
 API_SECRET = os.getenv("SECRET_KEY")
 API_PASSPHRASE = os.getenv("API_PASSPHRASE")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID = int(os.getenv("CHAT_ID", 0))
 
-# ─── Cliente de KuCoin ─────────────────────────────────────────────────────
-kucoin = Trade(key=API_KEY, secret=API_SECRET, passphrase=API_PASSPHRASE)
-
-# ─── Cliente de Telegram ───────────────────────────────────────────────────
+# ─── Inicialización de Clientes ───────────────────────────────────
+kucoin = Client(API_KEY, API_SECRET, API_PASSPHRASE)
 bot = Bot(token=TELEGRAM_TOKEN)
 dp = Dispatcher()
 
-# ─── Variables Globales ────────────────────────────────────────────────────
+# ─── Variables Globales ────────────────────────────────────────────
 bot_encendido = False
 operacion_activa = None
-saldo_total = 0.0
-historial_operaciones = []
+operaciones_hoy = 0
+ganancia_total_hoy = 0.0
 pares = ["PEPE/USDT", "FLOKI/USDT", "SHIB/USDT", "DOGE/USDT"]
+historico_en_memoria = []
+modelo_predictor = None
 volumen_anterior = {}
-modelo_predictor = None# ─── Reglas de tamaño mínimo ───────────────────────────────────────────────
-minimos_por_par = {
-    "PEPE/USDT": {"min_cantidad": 100000, "decimales": 0},
-    "FLOKI/USDT": {"min_cantidad": 100000, "decimales": 0},
-    "SHIB/USDT": {"min_cantidad": 10000, "decimales": 0},
-    "DOGE/USDT": {"min_cantidad": 1, "decimales": 2},
-}
 
-# ─── Teclado de Telegram ────────────────────────────────────────────────────
+# ─── Teclado para el Bot de Telegram ───────────────────────────────
 keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🚀 Encender Bot"), KeyboardButton(text="🛑 Apagar Bot")],
@@ -54,151 +48,160 @@ keyboard = ReplyKeyboardMarkup(
         [KeyboardButton(text="📈 Estado de Orden Actual")],
     ],
     resize_keyboard=True,
-)
+)# ─── Funciones Base ─────────────────────────────────────────────────
 
-# ─── Funciones de Trading ───────────────────────────────────────────────────
-async def obtener_saldo():
+async def obtener_saldo_disponible():
+    """Lee correctamente el saldo en la wallet de Trading de KuCoin (tipo 'trade')."""
     try:
         cuentas = kucoin.get_accounts()
         for cuenta in cuentas:
             if cuenta['currency'] == 'USDT' and cuenta['type'] == 'trade':
                 return float(cuenta['available'])
+        return 0.0
     except Exception as e:
         logging.error(f"Error obteniendo saldo: {e}")
-    return 0.0
+        return 0.0
 
-async def analizar_pares():
-    oportunidades = []
-    for par in pares:
-        try:
-            book = kucoin.get_order_book(symbol=par.replace("/", "-"))
-            bid = float(book['bids'][0][0])
-            ask = float(book['asks'][0][0])
-            spread = (ask - bid) / bid
+def calcular_kelly(saldo_total, win_rate=0.7, reward_risk=1.5):
+    """Calcula el tamaño de la operación basado en Kelly Criterion."""
+    kelly_fraction = (win_rate * (reward_risk + 1) - 1) / reward_risk
+    kelly_fraction = max(0.01, min(kelly_fraction, 0.5))  # Limitamos entre 1% y 50%
+    monto_kelly = saldo_total * kelly_fraction
+    return monto_kelly
 
-            if spread < 0.003:  # Ejemplo: spread menor a 0.3%
-                volumen = float(book['bids'][0][1])
-                if volumen > 500:  # Volumen mínimo aceptable
-                    oportunidades.append((par, spread, volumen))
-        except Exception as e:
-            logging.error(f"Error analizando {par}: {e}")
-    return oportunidades# ─── Modelo Predictor Simple ───────────────────────────────────────────────
-def entrenar_modelo():
-    X = np.random.rand(1000, 4)
-    y = np.random.choice([0, 1], size=1000)
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
-    modelo = RandomForestClassifier()
-    modelo.fit(X_train, y_train)
-    y_pred = modelo.predict(X_test)
-    acc = accuracy_score(y_test, y_pred)
-    logging.info(f"Precisión del modelo de predicción: {acc:.2f}")
-    return modelo
+async def limitar_por_volumen(par, monto_sugerido):
+    """Limita el monto máximo basado en el 4% del volumen de 24 horas del par."""
+    try:
+        ticker = kucoin.get_ticker(symbol=par.replace("/", "-"))
+        volumen_usdt_24h = float(ticker.get("volValue", 0))
+        limite_maximo = volumen_usdt_24h * 0.04  # 4% del volumen
+        return min(monto_sugerido, limite_maximo)
+    except Exception as e:
+        logging.error(f"Error obteniendo volumen de {par}: {e}")
+        return monto_sugerido# ─── Funciones de Compra, Venta y Trailing Stop ─────────────────────────────
 
-modelo_predictor = entrenar_modelo()
-
-# ─── Funciones para Comprar y Vender ────────────────────────────────────────
-async def comprar(par, cantidad):
+async def comprar(par, usdt_monto):
+    """Realiza una compra de mercado en el par usando fondos en USDT."""
     try:
         orden = kucoin.create_market_order(
             symbol=par.replace("/", "-"),
             side="buy",
-            size=None,
-            funds=str(cantidad)
+            funds=str(usdt_monto)
         )
-        logging.info(f"Compra ejecutada en {par} por {cantidad} USDT")
+        logging.info(f"Compra ejecutada en {par} por {usdt_monto} USDT")
         return orden
     except Exception as e:
-        logging.error(f"Error ejecutando compra: {e}")
+        logging.error(f"Error en compra: {e}")
         return None
 
 async def vender(par, cantidad):
+    """Vende en mercado una cantidad específica del par."""
     try:
         orden = kucoin.create_market_order(
             symbol=par.replace("/", "-"),
             side="sell",
             size=str(cantidad)
         )
-        logging.info(f"Venta ejecutada en {par} con cantidad {cantidad}")
+        logging.info(f"Venta ejecutada en {par} con {cantidad} unidades.")
         return orden
     except Exception as e:
-        logging.error(f"Error ejecutando venta: {e}")
-        return None# ─── Funciones de Trading Inteligente ───────────────────────────────────────
-async def analizar_par(par):
-    try:
-        libro_ordenes = kucoin.get_order_book(symbol=par.replace("/", "-"))
-        bids = libro_ordenes['bids']
-        asks = libro_ordenes['asks']
-        mejor_bid = float(bids[0][0]) if bids else 0
-        mejor_ask = float(asks[0][0]) if asks else 0
-        spread = (mejor_ask - mejor_bid) / mejor_ask * 100 if mejor_ask else 0
+        logging.error(f"Error en venta: {e}")
+        return None
 
-        volumen_24h = kucoin.get_ticker(par.replace("/", "-"))['volValue']
-        volumen = float(volumen_24h) if volumen_24h else 0
+async def estrategia_operacion(par):
+    """Analiza, entra en operación, y maneja Trailing Stop dinámico."""
+    global operacion_activa, operaciones_hoy, ganancia_total_hoy
 
-        if volumen > 10000 and spread < 0.5:
-            return True, mejor_bid, mejor_ask
-        else:
-            return False, mejor_bid, mejor_ask
-    except Exception as e:
-        logging.error(f"Error analizando {par}: {e}")
-        return False, 0, 0
-
-async def ejecutar_operacion(par):
-    global operacion_activa, operaciones_hoy, ganancia_total_hoy, _last_balance
-
-    # Análisis y validación
-    oportunidad, mejor_bid, mejor_ask = await analizar_par(par)
-    if not oportunidad:
+    saldo_disponible = await obtener_saldo_disponible()
+    if saldo_disponible < 5:
+        logging.warning("Saldo insuficiente para operar.")
         return
 
-    saldo_actual = obtener_saldo_disponible()
-    if saldo_actual is None or saldo_actual <= 0:
-        return
+    monto_kelly = calcular_kelly(saldo_disponible)
+    monto_ajustado = await limitar_por_volumen(par, monto_kelly)
 
-    monto_inversion = calcular_kelly(saldo_actual)
-    if monto_inversion < 1:
-        monto_inversion = 1
-
-    orden_compra = await comprar(par, monto_inversion)
+    orden_compra = await comprar(par, monto_ajustado)
     if not orden_compra:
         return
 
-    cantidad_adquirida = float(orden_compra['dealFunds']) / mejor_ask
-    precio_objetivo = mejor_ask * 1.025
+    deal_funds = float(orden_compra['dealFunds'])
+    deal_size = float(orden_compra['dealSize'])
+    precio_entrada = deal_funds / deal_size
 
-    logging.info(f"Esperando venta en {par} al precio objetivo: {precio_objetivo:.6f}")
+    logging.info(f"Compra realizada en {par} a {precio_entrada:.8f} USD")
 
-    while True:
-        _, bid_actual, ask_actual = await analizar_par(par)
-        if bid_actual >= precio_objetivo:
-            orden_venta = await vender(par, cantidad_adquirida)
-            if orden_venta:
+    operacion_activa = par
+    precio_maximo = precio_entrada
+
+    while bot_encendido:
+        try:
+            ticker = kucoin.get_ticker(symbol=par.replace("/", "-"))
+            precio_actual = float(ticker['price'])
+
+            if precio_actual > precio_maximo:
+                precio_maximo = precio_actual
+
+            stop_price = precio_maximo * 0.92  # Trailing Stop del -8%
+
+            if precio_actual <= stop_price:
+                await vender(par, deal_size)
+                ganancia = (precio_actual - precio_entrada) * deal_size
                 operaciones_hoy += 1
-                ganancia = (bid_actual - mejor_ask) * cantidad_adquirida
                 ganancia_total_hoy += ganancia
-                _last_balance += ganancia
-                historial_operaciones.append({
-                    "par": par,
-                    "entrada": mejor_ask,
-                    "salida": bid_actual,
-                    "ganancia": ganancia
-                })
-            break
-        await asyncio.sleep(2)
+
+                logging.info(f"Venta por Trailing Stop activado. Ganancia: {ganancia:.4f} USDT")
+                operacion_activa = None
+                break
+
+            await asyncio.sleep(2)
+
+        except Exception as e:
+            logging.error(f"Error durante monitoreo de operación en {par}: {e}")
+            break# ─── Funciones de Escaneo de Mercado y Flujo ───────────────────────────────
 
 async def escanear_mercado():
+    """Escanea el mercado constantemente para detectar oportunidades."""
+    global operacion_activa
+
     while bot_encendido:
+        if operacion_activa:
+            await asyncio.sleep(5)
+            continue  # Espera a que termine la operación activa
+
         for par in pares:
             try:
-                await ejecutar_operacion(par)
+                ticker = kucoin.get_ticker(symbol=par.replace("/", "-"))
+                volumen_24h = float(ticker.get("volValue", 0))
+                spread = (float(ticker.get("sell"), 0) - float(ticker.get("buy"), 0)) / float(ticker.get("sell"), 1)
+
+                if volumen_24h > 50000 and spread < 0.004:
+                    await estrategia_operacion(par)
+                    await asyncio.sleep(2)
             except Exception as e:
-                logging.error(f"Error en la operación con {par}: {e}")
-            await asyncio.sleep(2)# ─── Comandos de Telegram ───────────────────────────────────────────────────
+                logging.error(f"Error escaneando {par}: {e}")
+                continue
+
+        await asyncio.sleep(2)
+
+# ─── Modelo Predictor Simulado ─────────────────────────────────────────────
+
+def entrenar_modelo():
+    """Entrena un modelo de predicción básico."""
+    X = np.random.rand(1000, 4)
+    y = np.random.choice([0, 1], size=1000)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
+    modelo = RandomForestClassifier()
+    modelo.fit(X_train, y_train)
+    acc = accuracy_score(y_test, modelo.predict(X_test))
+    logging.info(f"Precisión del modelo de predicción: {acc:.2f}")
+    return modelo
+
+modelo_predictor = entrenar_modelo()# ─── Comandos de Telegram ────────────────────────────────────────────────
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     await message.answer(
-        "✅ *ZafroBot Scalper Pro V1* iniciado.\n\nSelecciona una opción:",
+        "✅ *ZafroBot Scalper Pro* iniciado.\n\nSelecciona una opción:",
         reply_markup=keyboard,
         parse_mode="Markdown"
     )
@@ -211,7 +214,7 @@ async def encender(message: types.Message):
         await message.answer("🟢 Bot encendido. Analizando mercado…", reply_markup=keyboard)
         asyncio.create_task(escanear_mercado())
     else:
-        await message.answer("⚠️ El bot ya está encendido.")
+        await message.answer("⚠️ El bot ya estaba encendido.", reply_markup=keyboard)
 
 @dp.message(lambda m: m.text == "🛑 Apagar Bot")
 async def apagar(message: types.Message):
@@ -222,21 +225,26 @@ async def apagar(message: types.Message):
 @dp.message(lambda m: m.text == "📊 Estado del Bot")
 async def estado_bot(message: types.Message):
     estado = "🟢 Encendido" if bot_encendido else "🔴 Apagado"
-    await message.answer(f"Estado actual: {estado}", reply_markup=keyboard)
+    await message.answer(
+        f"📊 Estado del Bot: {estado}\n"
+        f"🔹 Operaciones hoy: {operaciones_hoy}\n"
+        f"🔹 Ganancia hoy: {ganancia_total_hoy:.4f} USDT",
+        reply_markup=keyboard
+    )
 
 @dp.message(lambda m: m.text == "💰 Actualizar Saldo")
 async def actualizar_saldo(message: types.Message):
-    saldo = await obtener_saldo()
+    saldo = await obtener_saldo_disponible()
     await message.answer(f"💰 Saldo disponible: {saldo:.2f} USDT", reply_markup=keyboard)
 
 @dp.message(lambda m: m.text == "📈 Estado de Orden Actual")
-async def estado_orden(message: types.Message):
+async def estado_operacion(message: types.Message):
     if operacion_activa:
-        await message.answer(f"✅ Operación activa en {operacion_activa}")
+        await message.answer(f"🚀 Operación activa: {operacion_activa}", reply_markup=keyboard)
     else:
-        await message.answer("❌ No hay operación activa en este momento.", reply_markup=keyboard)
+        await message.answer("❌ No hay operación activa actualmente.", reply_markup=keyboard)
 
-# ─── Función Principal ─────────────────────────────────────────────────────
+# ─── Lanzamiento Principal ───────────────────────────────────────────────
 
 async def main():
     await dp.start_polling(bot)
