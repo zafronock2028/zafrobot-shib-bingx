@@ -105,26 +105,32 @@ async def loop_operaciones():
                 await asyncio.sleep(10)
                 continue
 
-            for par in pares:
-                if operacion_activa:
-                    break
+                    for par in pares:
+            if operacion_activa:
+                break  # Solo una operación activa a la vez
 
+            try:
                 ticker = market_client.get_ticker(par)
-                logging.debug(ticker)
+                logging.debug(f"Ticker recibido: {ticker}")
 
-                volumen_24h = float(ticker.get('volValue') or ticker.get('vol') or 0)
-                precio_actual = float(ticker.get('price', 0))
+                # Validación segura de datos
+                volumen_24h = float(ticker.get('volValue') or 0)
+                precio_actual = float(ticker.get('price') or 0)
+
+                if volumen_24h == 0 or precio_actual == 0:
+                    logging.warning(f"⚠️ Datos no válidos para {par}. Volumen o precio = 0")
+                    continue
+
                 logging.info(f"Analizando {par} | Volumen 24h: {volumen_24h}")
 
                 porcentaje_inversion = 0.8 if volumen_24h > 100000 else 0.5
                 monto_usar = saldo * porcentaje_inversion
                 monto_maximo_volumen = volumen_24h * 0.04
                 monto_final = min(monto_usar, monto_maximo_volumen)
-                logging.info(f"➡️ Monto a usar en {par}: {monto_final}")
+                logging.info(f"➡️ Monto a usar en {par}: {monto_final:.2f} USDT")
 
                 if monto_final < 5:
                     continue
-
                 velas = market_client.get_kline(par, "1min", 5)
                 precios = [float(v[2]) for v in velas]
                 promedio_precio = sum(precios) / len(precios)
