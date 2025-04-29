@@ -1,7 +1,12 @@
 #!/bin/bash
 
-echo "Iniciando ZafroBot Dinámico Pro..."
+echo "======================================="
+echo "   Iniciando ZafroBot Dinámico Pro...   "
+echo "======================================="
 
-# Activar entorno virtual si aplica (Render lo maneja automáticamente)
-# Ejecutar el bot
-python main.py
+while true
+do
+  python main.py
+  echo "⚠️ El bot se detuvo. Reiniciando en 5 segundos..."
+  sleep 5
+done
