@@ -67,6 +67,11 @@ async def comandos_principales(message: types.Message):
     elif message.text == "🛑 Apagar Bot":
         bot_encendido = False
         await message.answer("🛑 Bot apagado manualmente.")
+
+    elif message.text == "📊 Estado Bot":
+        estado = "✅ ENCENDIDO" if bot_encendido else "🛑 APAGADO"
+        await message.answer(f"📊 Estado actual del bot: {estado}")
+
     elif message.text == "📈 Estado de Orden Actual":
         if operacion_activa:
             estado = "GANANCIA ✅" if operacion_activa["ganancia"] >= 0 else "PÉRDIDA ❌"
@@ -102,10 +107,10 @@ async def loop_operaciones():
 
             for par in pares:
                 if operacion_activa:
-                    break  # Solo una operación activa a la vez
+                    break
 
                 ticker = market_client.get_ticker(par)
-                logging.debug(ticker)  # Mostramos todo el contenido recibido
+                logging.debug(ticker)
 
                 volumen_24h = float(ticker.get('volValue') or ticker.get('vol') or 0)
                 precio_actual = float(ticker.get('price', 0))
