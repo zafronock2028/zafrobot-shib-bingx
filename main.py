@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os
 from aiogram import Bot, Dispatcher, types
-from kucoin.client import Spot as Client
+from kucoin.client import Client
 from kucoin.exceptions import KucoinAPIException
 import aiohttp
 from dotenv import load_dotenv
