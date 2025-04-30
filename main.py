@@ -18,7 +18,7 @@ API_PASSPHRASE = os.getenv("API_PASSPHRASE")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID = int(os.getenv("CHAT_ID", 0))
 
-bot = Bot(token=TELEGRAM_BOT_TOKEN, parse_mode="Markdown")
+bot = Bot(token=TELEGRAM_BOT_TOKEN)
 dp = Dispatcher()
 market_client = Market()
 trade_client = Trade(key=API_KEY, secret=SECRET_KEY, passphrase=API_PASSPHRASE)
@@ -44,7 +44,7 @@ keyboard = ReplyKeyboardMarkup(
 
 @dp.message(Command("start"))
 async def start(message: types.Message):
-    await message.answer("✅ *¡Bienvenido al Zafrobot Scalper V1 Pro!*", reply_markup=keyboard)
+    await message.answer("✅ ¡Bienvenido al Zafrobot Dinámico Pro Scalping!", reply_markup=keyboard)
 
 @dp.message()
 async def comandos(message: types.Message):
@@ -52,41 +52,38 @@ async def comandos(message: types.Message):
 
     if message.text == "💰 Saldo":
         saldo = obtener_saldo_disponible()
-        await message.answer(f"💰 *Tu saldo disponible es:* `{saldo:.2f} USDT`")
+        await message.answer(f"💰 Tu saldo disponible es: {saldo:.2f} USDT")
 
     elif message.text == "🚀 Encender Bot":
         if not bot_encendido:
             bot_encendido = True
-            await message.answer("*Bot encendido.*")
-Analizando oportunidades...")
+            await message.answer("✅ Bot encendido. Analizando oportunidades...")
             asyncio.create_task(loop_operaciones())
         else:
-            await message.answer("⚠️ *El bot ya está encendido.*")
+            await message.answer("⚠️ El bot ya está encendido.")
 
     elif message.text == "🛑 Apagar Bot":
         bot_encendido = False
-        await message.answer("🛑 *Bot apagado manualmente.*")
+        await message.answer("🛑 Bot apagado manualmente.")
 
     elif message.text == "📊 Estado Bot":
-        estado = "✅ *ENCENDIDO*" if bot_encendido else "🛑 *APAGADO*"
-        await message.answer(f"📊 *Estado actual del bot:* {estado}")
+        estado = "✅ ENCENDIDO" if bot_encendido else "🛑 APAGADO"
+        await message.answer(f"📊 Estado actual del bot: {estado}")
 
     elif message.text == "📈 Estado de Orden Actual":
         if operacion_activa:
-            estado = "✅ *GANANCIA*" if operacion_activa["ganancia"] >= 0 else "❌ *PÉRDIDA*"
+            estado = "GANANCIA ✅" if operacion_activa["ganancia"] >= 0 else "PÉRDIDA ❌"
             await message.answer(
-                f"📈 *Operación activa en* `{operacion_activa['par']}`
+                f"📈 Operación activa en {operacion_activa['par']}
 "
-                f"Entrada: `{operacion_activa['entrada']:.6f}`
+                f"Entrada: {operacion_activa['entrada']:.6f} USDT
 "
-                f"Actual: `{operacion_activa['actual']:.6f}`
+                f"Actual: {operacion_activa['actual']:.6f} USDT
 "
-                f"Ganancia: `{operacion_activa['ganancia']:.6f} USDT`
-"
-                f"{estado}"
+                f"Ganancia: {operacion_activa['ganancia']:.6f} USDT ({estado})"
             )
         else:
-            await message.answer("⚠️ *No hay operaciones activas actualmente.*")
+            await message.answer("⚠️ No hay operaciones activas actualmente.")
 
 def obtener_saldo_disponible():
     try:
@@ -174,13 +171,13 @@ async def loop_operaciones():
                     }
 
                     await bot.send_message(CHAT_ID,
-                        f"✅ *COMPRA EJECUTADA*
+                        f"✅ COMPRA EJECUTADA
 
-Par: `{mejor_par}`
-Entrada: `{precio_actual}`
-Cantidad: `{cantidad}`
+Par: {mejor_par}
+Entrada: {precio_actual}
+Cantidad: {cantidad}
 
-_Esperando oportunidad de salida..._"
+Esperando oportunidad de salida..."
                     )
                     await monitorear_salida()
 
@@ -213,18 +210,18 @@ async def monitorear_salida():
                     side="sell",
                     size=str(operacion_activa["cantidad"])
                 )
-                resultado = "✅ *GANANCIA*" if ganancia >= 0 else "❌ *PÉRDIDA*"
+                resultado = "GANANCIA ✅" if ganancia >= 0 else "PÉRDIDA ❌"
                 if ganancia >= 0:
                     historial_operaciones["ganadas"] += 1
                 else:
                     historial_operaciones["perdidas"] += 1
 
                 await bot.send_message(CHAT_ID,
-                    f"📤 *VENTA COMPLETADA*
+                    f"📤 VENTA COMPLETADA
 
-Par: `{operacion_activa['par']}`
-Salida: `{precio_actual}`
-Ganancia: `{ganancia:.4f} USDT`
+Par: {operacion_activa['par']}
+Salida: {precio_actual}
+Ganancia: {ganancia:.4f} USDT
 
 Resultado: {resultado}"
                 )
