@@ -31,7 +31,6 @@ ganancia_objetivo = 0.008
 historial_operaciones = {"ganadas": 1, "perdidas": 1}
 min_orden_usdt = 3.0
 max_orden_usdt = 6.0
-
 keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🚀 Encender Bot")],
@@ -84,9 +83,7 @@ async def comandos(message: types.Message):
                 )
             await message.answer(mensaje)
         else:
-            await message.answer("⚠️ No hay operaciones activas actualmente.")
-
-async def obtener_saldo_disponible():
+            await message.answer("⚠️ No hay operaciones activas actualmente.")async def obtener_saldo_disponible():
     try:
         cuentas = user_client.get_account_list()
         saldo = next((float(x["available"]) for x in cuentas if x["currency"] == "USDT"), 0.0)
