@@ -5,6 +5,7 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.filters import Command
 from kucoin.client import Market, Trade, User
 
+# Reemplaza estas variables con tus valores reales
 API_KEY = "TU_API_KEY"
 SECRET_KEY = "TU_SECRET_KEY"
 API_PASS = "TU_API_PASS"
@@ -34,62 +35,57 @@ max_orden_usdt = 6.0
 
 keyboard = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="ð Encender Bot")],
-        [KeyboardButton(text="â Apagar Bot")],
-        [KeyboardButton(text="ð° Saldo")],
-        [KeyboardButton(text="ð Estado Bot")],
-        [KeyboardButton(text="ð Estado de Orden Activa")]
+        [KeyboardButton(text="🚀 Encender Bot")],
+        [KeyboardButton(text="⛔ Apagar Bot")],
+        [KeyboardButton(text="💰 Saldo")],
+        [KeyboardButton(text="📊 Estado Bot")],
+        [KeyboardButton(text="📈 Estado de Orden Activa")]
     ],
     resize_keyboard=True
 )
 
 @dp.message(Command("start"))
 async def start(message: types.Message):
-    await message.answer("â Â¡Bienvenido al Zafrobot Scalper V1!", reply_markup=keyboard)
+    await message.answer("✅ ¡Bienvenido al Zafrobot Scalper V1!", reply_markup=keyboard)
 
 @dp.message()
 async def comandos(message: types.Message):
     global bot_encendido
 
-    if message.text == "ð° Saldo":
+    if message.text == "💰 Saldo":
         saldo = await obtener_saldo_disponible()
-        await message.answer(f"ð° Tu saldo disponible es: {saldo:.2f} USDT")
+        await message.answer(f"💰 Tu saldo disponible es: {saldo:.2f} USDT")
 
-    elif message.text == "ð Encender Bot":
+    elif message.text == "🚀 Encender Bot":
         if not bot_encendido:
             bot_encendido = True
-            await message.answer("â Bot encendido correctamente.")
+            await message.answer("✅ Bot encendido correctamente.")
             asyncio.create_task(loop_operaciones())
         else:
-            await message.answer("â ï¸ El bot ya estÃ¡ encendido.")
+            await message.answer("⚠️ El bot ya está encendido.")
 
-    elif message.text == "â Apagar Bot":
+    elif message.text == "⛔ Apagar Bot":
         bot_encendido = False
-        await message.answer("â Bot apagado manualmente.")
+        await message.answer("⛔ Bot apagado manualmente.")
 
-    elif message.text == "ð Estado Bot":
-        estado = "â ENCENDIDO" if bot_encendido else "â APAGADO"
-        await message.answer(f"ð Estado actual del bot: {estado}")
+    elif message.text == "📊 Estado Bot":
+        estado = "✅ ENCENDIDO" if bot_encendido else "⛔ APAGADO"
+        await message.answer(f"📊 Estado actual del bot: {estado}")
 
-    elif message.text == "ð Estado de Orden Activa":
+    elif message.text == "📈 Estado de Orden Activa":
         if operaciones_activas:
             mensaje = ""
             for op in operaciones_activas:
-                estado = "GANANCIA â" if op["ganancia"] > 0 else "PERDIENDO â"
+                estado = "GANANCIA ✅" if op["ganancia"] > 0 else "PERDIENDO ❌"
                 mensaje += (
-                    f"ð Par: {op['par']}
-"
-                    f"Entrada: {op['entrada']:.6f} USDT
-"
-                    f"Actual: {op['actual']:.6f} USDT
-"
-                    f"Ganancia: {op['ganancia']:.6f} USDT ({estado})
-
-"
+                    f"📈 Par: {op['par']}\n"
+                    f"Entrada: {op['entrada']:.6f} USDT\n"
+                    f"Actual: {op['actual']:.6f} USDT\n"
+                    f"Ganancia: {op['ganancia']:.6f} USDT ({estado})\n\n"
                 )
             await message.answer(mensaje)
         else:
-            await message.answer("â ï¸ No hay operaciones activas actualmente.")
+            await message.answer("⚠️ No hay operaciones activas actualmente.")
 
 async def obtener_saldo_disponible():
     try:
@@ -167,13 +163,10 @@ async def loop_operaciones():
                     }
                     operaciones_activas.append(operacion)
 
-                    logging.info(f"â COMPRA EJECUTADA en {par} | Entrada: {analisis['precio']} | Cantidad: {cantidad}")
+                    logging.info(f"✅ COMPRA EJECUTADA en {par} | Entrada: {analisis['precio']} | Cantidad: {cantidad}")
                     await bot.send_message(
                         CHAT_ID,
-                        f"â *COMPRA EJECUTADA*
-Par: `{par}`
-Entrada: `{analisis['precio']:.6f}`
-Cantidad: `{cantidad}`"
+                        f"✅ *COMPRA EJECUTADA*\nPar: `{par}`\nEntrada: `{analisis['precio']:.6f}`\nCantidad: `{cantidad}`"
                     )
                     asyncio.create_task(monitorear_salida(operacion))
                 except Exception as e:
@@ -203,27 +196,24 @@ async def monitorear_salida(operacion):
             if variacion >= ganancia_objetivo or retroceso <= trailing_stop_pct:
                 trade_client.create_market_order(symbol=par, side="sell", size=str(cantidad))
                 operaciones_activas.remove(operacion)
-                resultado = "â GANANCIA" if ganancia >= 0 else "â PÃRDIDA"
+                resultado = "✅ GANANCIA" if ganancia >= 0 else "❌ PÉRDIDA"
 
                 if ganancia >= 0:
                     historial_operaciones["ganadas"] += 1
                 else:
                     historial_operaciones["perdidas"] += 1
 
-                logging.info(f"ð´ VENTA en {par} | Salida: {actual} | Resultado: {resultado}")
+                logging.info(f"🔴 VENTA en {par} | Salida: {actual} | Resultado: {resultado}")
                 await bot.send_message(
                     CHAT_ID,
-                    f"ð´ *VENTA EJECUTADA*
-Par: `{par}`
-Salida: `{actual:.6f}`
-Ganancia: `{ganancia:.4f} USDT`
-Resultado: {resultado}"
+                    f"🔴 *VENTA EJECUTADA*\nPar: `{par}`\nSalida: `{actual:.6f}`\nGanancia: `{ganancia:.4f} USDT`\nResultado: {resultado}"
                 )
                 break
         except Exception as e:
             logging.error(f"Error monitoreando salida de {par}: {e}")
         await asyncio.sleep(4)
 
+# Ejecutar bot
 async def main():
     logging.basicConfig(level=logging.INFO)
     await dp.start_polling(bot)
