@@ -25,11 +25,11 @@ user_client = User(API_KEY, SECRET_KEY, API_PASSPHRASE)
 
 bot_encendido = False
 operaciones_activas = []
-max_operaciones = 3
-pares = ["SHIB-USDT", "PEPE-USDT", "FLOKI-USDT", "DOGE-USDT", "TRUMP-USDT", "SUI-USDT", "TURBO-USDT", "BONK-USDT",
-         "KAS-USDT", "WIF-USDT", "XMR-USDT", "HYPE-USDT", "HYPER-USDT", "OM-USDT", "ENA-USDT"]
+pares = ["SHIB-USDT", "PEPE-USDT", "FLOKI-USDT", "DOGE-USDT", "TRUMP-USDT", "SUI-USDT", "TURBO-USDT",
+         "BONK-USDT", "KAS-USDT", "WIF-USDT", "XMR-USDT", "HYPE-USDT", "HYPER-USDT", "OM-USDT", "ENA-USDT"]
 trailing_stop_pct = -0.08
-ganancia_objetivo = 0.012
+ganancia_objetivo = 0.008
+max_operaciones = 3
 historial_operaciones = {"ganadas": 1, "perdidas": 1}
 
 keyboard = ReplyKeyboardMarkup(
@@ -41,11 +41,9 @@ keyboard = ReplyKeyboardMarkup(
         [KeyboardButton(text="📈 Estado de Orden Actual")]
     ],
     resize_keyboard=True
-)
-
-@dp.message(Command("start"))
+)@dp.message(Command("start"))
 async def start(message: types.Message):
-    await message.answer("✅ ¡Bienvenido al Zafrobot Scalper V1 MULTITRADE!", reply_markup=keyboard)
+    await message.answer("✅ ¡Bienvenido al Zafrobot Scalper V1!", reply_markup=keyboard)
 
 @dp.message()
 async def comandos(message: types.Message):
@@ -73,14 +71,10 @@ async def comandos(message: types.Message):
 
     elif message.text == "📈 Estado de Orden Actual":
         if operaciones_activas:
-            mensaje = "📈 Operaciones activas:\n\n"
+            mensaje = ""
             for op in operaciones_activas:
-                estado = "GANANCIA ✅" if op["ganancia"] >= 0 else "PÉRDIDA ❌"
-                mensaje += (
-                    f"Par: {op['par']}\n"
-                    f"Entrada: {op['entrada']:.6f} | Actual: {op['actual']:.6f}\n"
-                    f"Ganancia: {op['ganancia']:.4f} USDT ({estado})\n\n"
-                )
+                mensaje += (f"📈 Par: {op['par']} | Entrada: {op['entrada']:.6f} | "
+                            f"Actual: {op['actual']:.6f} | Ganancia: {op['ganancia']:.4f} USDT\n")
             await message.answer(mensaje)
         else:
             await message.answer("⚠️ No hay operaciones activas actualmente.")
@@ -98,14 +92,13 @@ def calcular_kelly(win_rate, avg_win=1, avg_loss=1):
     kelly = (win_rate * avg_win - (1 - win_rate) * avg_loss) / avg_win
     return max(min(kelly, 1), 0.05)
 
-# Asegúrate de que esto quede en la siguiente línea
-async def loop_operaciones():
+# Aquí continúa el análisis, compras, monitoreo y ventas (puedo enviarte esa parte si deseas)async def loop_operaciones():
     global bot_encendido, operaciones_activas
 
     while bot_encendido:
         try:
             if len(operaciones_activas) >= max_operaciones:
-                await asyncio.sleep(3)
+                await asyncio.sleep(4)
                 continue
 
             saldo = obtener_saldo_disponible()
@@ -147,9 +140,9 @@ async def loop_operaciones():
                     if velas_verdes >= 3:
                         puntaje += 1
 
-                    logging.info(f"🔍 {par} | Puntaje: {puntaje} | Precio: {precio_actual} | Volumen24h: {volumen_24h}")
+                    logging.info(f"🔍 {par} | Puntaje: {puntaje} | Precio: {precio_actual:.6f} | Vol 24h: {volumen_24h:.2f}")
 
-                    if puntaje >= 2:
+                    if puntaje >= 1:
                         monto_kelly = saldo * porcentaje_kelly
                         monto_max_vol = volumen_24h * 0.04
                         monto_final = min(monto_kelly, monto_max_vol, saldo * 0.8)
@@ -170,7 +163,7 @@ async def loop_operaciones():
 
                         operaciones_activas.append(operacion)
 
-                        logging.info(f"✅ COMPRA {par} @ {precio_actual} | Cantidad: {cantidad}")
+                        logging.info(f"✅ COMPRA en {par} @ {precio_actual:.6f} | Cantidad: {cantidad}")
 
                         await bot.send_message(CHAT_ID,
                             f"✅ *COMPRA EJECUTADA*\nPar: `{par}`\nEntrada: `{precio_actual}`\nCantidad: `{cantidad}`\n\n_Esperando oportunidad de salida..._"
@@ -183,9 +176,7 @@ async def loop_operaciones():
         except Exception as e:
             logging.error(f"Error general en loop: {e}")
 
-        await asyncio.sleep(3)
-
-async def monitorear_salida(operacion):
+        await asyncio.sleep(3)async def monitorear_salida(operacion):
     global operaciones_activas
     precio_max = operacion["entrada"]
 
@@ -193,6 +184,7 @@ async def monitorear_salida(operacion):
         try:
             ticker = market_client.get_ticker(operacion["par"])
             precio_actual = float(ticker["price"])
+
             if precio_actual > precio_max:
                 precio_max = precio_actual
 
@@ -216,7 +208,7 @@ async def monitorear_salida(operacion):
                 else:
                     historial_operaciones["perdidas"] += 1
 
-                logging.info(f"📤 VENTA {operacion['par']} @ {precio_actual} | Ganancia: {ganancia:.4f} USDT")
+                logging.info(f"📤 VENTA en {operacion['par']} @ {precio_actual:.6f} | Ganancia: {ganancia:.4f} USDT")
 
                 await bot.send_message(
                     CHAT_ID,
@@ -226,7 +218,7 @@ async def monitorear_salida(operacion):
                 break
 
         except Exception as e:
-            logging.error(f"Error monitoreando salida {operacion['par']}: {e}")
+            logging.error(f"Error monitoreando salida en {operacion['par']}: {e}")
 
         await asyncio.sleep(2)
 
