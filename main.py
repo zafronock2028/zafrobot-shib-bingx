@@ -73,18 +73,18 @@ async def comandos(message: types.Message):
 
     elif message.text == "📈 Estado de Orden Activa":
         if operaciones_activas:
-            mensaje = ""
-            for op in operaciones_activas:
-                estado = "GANANCIA ✅" if op["ganancia"] > 0 else "PERDIENDO ❌"
-                mensaje += (
-                    f"📈 Par: {op['par']}\n"
-                    f"Entrada: {op['entrada']:.6f} USDT\n"
-                    f"Actual: {op['actual']:.6f} USDT\n"
-                    f"Ganancia: {op['ganancia']:.6f} USDT ({estado})\n\n"
-                )
-            await message.answer(mensaje)
-                else:
-            await message.answer("⚠️ No hay operaciones activas actualmente.")
+    mensaje = ""
+    for op in operaciones_activas:
+        estado = "GANANCIA ✅" if op["ganancia"] > 0 else "PERDIENDO ❌"
+        mensaje += (
+            f"📈 Par: {op['par']}\n"
+            f"Entrada: {op['entrada']:.6f} USDT\n"
+            f"Actual: {op['actual']:.6f} USDT\n"
+            f"Ganancia: {op['ganancia']:.6f} USDT ({estado})\n\n"
+        )
+    await message.answer(mensaje)
+else:
+    await message.answer("⚠️ No hay operaciones activas actualmente.")
 
 # ---------------------------
 # Funciones de operación
