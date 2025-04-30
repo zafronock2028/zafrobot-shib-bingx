@@ -115,10 +115,10 @@ async def loop_operaciones():
         logging.warning(f"⚠️ Datos no válidos para {par}")
         continue
 
-porcentaje = 0.8 if volumen_usdt > 100000 else 0.5
-                    monto_uso = saldo * porcentaje
-                    maximo = volumen_24h * 0.04
-                    monto_final = min(monto_uso, maximo)
+    porcentaje = 0.8 if volumen_24h > 100000 else 0.5
+    monto_uso = saldo * porcentaje
+    maximo = volumen_24h * 0.04
+    monto_final = min(monto_uso, maximo)
 
                     if monto_final < 5:
                         continue
