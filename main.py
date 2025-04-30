@@ -72,7 +72,7 @@ async def comandos(message: types.Message):
         await message.answer(f"📊 Estado actual del bot: {estado}")
 
     elif message.text == "📈 Estado de Orden Activa":
-    if operaciones_activas:
+        if operaciones_activas:
         mensaje = ""
         for op in operaciones_activas:
             estado = "GANANCIA ✅" if op["ganancia"] > 0 else "PERDIENDO ❌"
