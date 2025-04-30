@@ -26,9 +26,14 @@ user_client = User(API_KEY, SECRET_KEY, API_PASSPHRASE)
 
 bot_encendido = False
 operacion_activa = None
-pares = ["SHIB-USDT", "PEPE-USDT", "FLOKI-USDT", "DOGE-USDT"]
+pares = [
+    "SHIB-USDT", "PEPE-USDT", "FLOKI-USDT", "DOGE-USDT",
+    "TRUMP-USDT", "SUI-USDT", "TURBO-USDT", "BONK-USDT",
+    "KAS-USDT", "WIF-USDT", "XMR-USDT", "HYPE-USDT",
+    "HYPER-USDT", "OM-USDT", "ENA-USDT"
+]
 trailing_stop_pct = -0.08
-ganancia_objetivo = 0.012
+ganancia_objetivo = 0.008
 historial_operaciones = {"ganadas": 1, "perdidas": 1}
 
 keyboard = ReplyKeyboardMarkup(
@@ -44,7 +49,7 @@ keyboard = ReplyKeyboardMarkup(
 
 @dp.message(Command("start"))
 async def start(message: types.Message):
-    await message.answer("✅ ¡Bienvenido al Zafrobot Dinámico Pro Scalping!", reply_markup=keyboard)
+    await message.answer("✅ ¡Bienvenido al Zafrobot Scalper V1 Ultra-Operativo!", reply_markup=keyboard)
 
 @dp.message()
 async def comandos(message: types.Message):
@@ -100,9 +105,7 @@ def obtener_saldo_disponible():
 
 def calcular_kelly(win_rate, avg_win=1, avg_loss=1):
     kelly = (win_rate * avg_win - (1 - win_rate) * avg_loss) / avg_win
-    return max(min(kelly, 1), 0.05)
-
-async def loop_operaciones():
+    return max(min(kelly, 1), 0.05)async def loop_operaciones():
     global bot_encendido, operacion_activa
 
     while bot_encendido:
@@ -115,9 +118,10 @@ async def loop_operaciones():
             win_rate = historial_operaciones["ganadas"] / (historial_operaciones["ganadas"] + historial_operaciones["perdidas"])
             porcentaje_kelly = calcular_kelly(win_rate)
 
-            pares_validos = []
-
             for par in pares:
+                if operacion_activa:
+                    break
+
                 try:
                     stats = market_client.get_24h_stats(par)
                     precio_actual = float(stats.get("last", 0))
@@ -145,51 +149,39 @@ async def loop_operaciones():
                     if velas_verdes >= 3:
                         puntaje += 1
 
-                    logging.info(
-                        f"🔍 Analizando {par} | Precio actual: {precio_actual} | Promedio 5 velas: {promedio_precio:.8f} | "
-                        f"Volumen 24h: {volumen_24h} | Volumen reciente: {volumen_reciente} | Puntaje: {puntaje}"
-                    )
-
                     if puntaje >= 2:
-                        pares_validos.append((par, puntaje))
+                        monto_kelly = saldo * porcentaje_kelly
+                        monto_max_vol = volumen_24h * 0.04
+                        monto_final = min(monto_kelly, monto_max_vol, saldo * 0.8)
 
-                except Exception:
+                        if monto_final >= 5:
+                            cantidad = round(monto_final / precio_actual, 2)
+                            trade_client.create_market_order(symbol=par, side="buy", size=str(cantidad))
+
+                            operacion_activa = {
+                                "par": par,
+                                "entrada": precio_actual,
+                                "cantidad": cantidad,
+                                "actual": precio_actual,
+                                "ganancia": 0.0
+                            }
+
+                            await bot.send_message(
+                                CHAT_ID,
+                                f"✅ *COMPRA EJECUTADA*\n\nPar: `{par}`\nEntrada: `{precio_actual}`\nCantidad: `{cantidad}`\n\n_Esperando oportunidad de salida..._"
+                            )
+                            await monitorear_salida()
+                            break
+
+                except Exception as e:
+                    logging.error(f"Error procesando par {par}: {e}")
                     continue
 
-            if pares_validos and not operacion_activa:
-                mejor_par = pares_validos[0][0]
-                stats = market_client.get_24h_stats(mejor_par)
-                precio_actual = float(stats.get("last", 0))
-                volumen_24h = float(stats.get("volValue", 0))
-
-                monto_kelly = saldo * porcentaje_kelly
-                monto_max_vol = volumen_24h * 0.04
-                monto_final = min(monto_kelly, monto_max_vol, saldo * 0.8)
-
-                if monto_final >= 5:
-                    cantidad = round(monto_final / precio_actual, 2)
-                    trade_client.create_market_order(symbol=mejor_par, side="buy", size=str(cantidad))
-
-                    operacion_activa = {
-                        "par": mejor_par,
-                        "entrada": precio_actual,
-                        "cantidad": cantidad,
-                        "actual": precio_actual,
-                        "ganancia": 0.0
-                    }
-
-                    logging.info(f"✅ COMPRA ejecutada en {mejor_par} | Entrada: {precio_actual} | Cantidad: {cantidad}")
-
-                    await bot.send_message(
-                        CHAT_ID,
-                        f"✅ *COMPRA EJECUTADA*\n\nPar: `{mejor_par}`\nEntrada: `{precio_actual}`\nCantidad: `{cantidad}`\n\n_Esperando oportunidad de salida..._"
-                    )
-                    await monitorear_salida()
-
         except Exception as e:
-            logging.error(f"Error general: {e}")
+            logging.error(f"Error general en loop_operaciones: {e}")
+            await asyncio.sleep(5)
 
-        await asyncio.sleep(2)
+        await asyncio.sleep(1)
 
 async def monitorear_salida():
     global operacion_activa
