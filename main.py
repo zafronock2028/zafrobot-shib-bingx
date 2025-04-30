@@ -105,13 +105,10 @@ async def loop_operaciones():
                     break
 
                 try:
-                    ticker = market_client.get_24hr_stats(par)
-precio_actual = float(ticker.get("last", 0))
-volumen_24h = float(ticker.get("volValue", 0))
-                    from kucoin.client import Market
-
-market_client = Market()
-datos = market_client.get_24h_stats(symbol=par)
+    datos = market_client.get_24hr_stats(symbol=par)
+    precio_actual = float(datos.get("last", 0))
+    volumen_usdt = float(datos.get("volValue", 0))  # Volumen en USDT
+    volumen_token = float(datos.get("vol", 0))      # Volumen en cantidad del token
 
 precio_actual = float(datos.get("last", 0))
 volumen_usdt = float(datos.get("volValue", 0))  # Volumen en USDT
