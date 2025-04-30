@@ -107,12 +107,11 @@ async def loop_operaciones():
                 try:
     datos = market_client.get_24hr_stats(symbol=par)
     precio_actual = float(datos.get("last", 0))
-    volumen_usdt = float(datos.get("volValue", 0))  # Volumen en USDT
-    volumen_token = float(datos.get("vol", 0))      # Volumen en cantidad del token
+    volumen_24h = float(datos.get("volValue", 0))
 
-    logging.info(f"🧠 Analizando {par} | Precio: {precio_actual} | Volumen 24h: {volumen_usdt}")
+    logging.info(f"🧠 Analizando {par} | Precio: {precio_actual} | Volumen 24h: {volumen_24h}")
 
-    if volumen_usdt == 0 or precio_actual == 0:
+    if volumen_24h == 0 or precio_actual == 0:
         logging.warning(f"⚠️ Datos no válidos para {par}")
         continue
 
