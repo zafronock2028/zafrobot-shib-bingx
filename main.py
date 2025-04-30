@@ -101,54 +101,54 @@ async def loop_operaciones():
                 continue
 
             for par in pares:
-    if operacion_activa:
-        break
+                if operacion_activa:
+                    break
 
-    try:
-        stats = market_client.get_24h_stats(par)
-        precio_actual = float(stats.get("last", 0))
-        volumen_24h = float(stats.get("volValue", 0))
+                try:
+                    stats = market_client.get_24h_stats(par)
+                    precio_actual = float(stats.get("last", 0))
+                    volumen_24h = float(stats.get("volValue", 0))
 
-        if volumen_24h == 0 or precio_actual == 0:
-            logging.warning(f"⚠️ Datos no válidos para {par}")
-            continue
+                    if volumen_24h == 0 or precio_actual == 0:
+                        logging.warning(f"⚠️ Datos no válidos para {par}")
+                        continue
 
-        logging.info(f"🧠 Analizando {par} | Precio: {precio_actual} | Volumen 24h: {volumen_24h}")
+                    logging.info(f"🧠 Analizando {par} | Precio: {precio_actual} | Volumen 24h: {volumen_24h}")
 
-        porcentaje_inversion = 0.8 if volumen_24h > 100000 else 0.5
-        monto_usar = saldo * porcentaje_inversion
-        monto_max_volumen = volumen_24h * 0.04
-        monto_final = min(monto_usar, monto_max_volumen)
+                    porcentaje_inversion = 0.8 if volumen_24h > 100000 else 0.5
+                    monto_usar = saldo * porcentaje_inversion
+                    monto_max_volumen = volumen_24h * 0.04
+                    monto_final = min(monto_usar, monto_max_volumen)
 
-        if monto_final < 5:
-            continue
+                    if monto_final < 5:
+                        continue
 
-        velas = market_client.get_kline(symbol=par, kline_type="1min", size=5)
-        precios = [float(v[2]) for v in velas]
-        if not precios:
-            continue
+                    velas = market_client.get_kline(symbol=par, kline_type="1min", size=5)
+                    precios = [float(v[2]) for v in velas]
+                    if not precios:
+                        continue
 
-        promedio_precio = sum(precios) / len(precios)
-        if precio_actual < promedio_precio:
-            cantidad = round(monto_final / precio_actual, 2)
-            trade_client.create_market_order(
-                symbol=par,
-                side="buy",
-                size=str(cantidad)
-            )
-            operacion_activa = {
-                "par": par,
-                "entrada": precio_actual,
-                "cantidad": cantidad,
-                "actual": precio_actual,
-                "ganancia": 0.0
-            }
-            await monitorear_salida()
-            break
+                    promedio_precio = sum(precios) / len(precios)
+                    if precio_actual < promedio_precio:
+                        cantidad = round(monto_final / precio_actual, 2)
+                        trade_client.create_market_order(
+                            symbol=par,
+                            side="buy",
+                            size=str(cantidad)
+                        )
+                        operacion_activa = {
+                            "par": par,
+                            "entrada": precio_actual,
+                            "cantidad": cantidad,
+                            "actual": precio_actual,
+                            "ganancia": 0.0
+                        }
+                        await monitorear_salida()
+                        break
 
-    except Exception as e:
-        logging.error(f"Error procesando par {par}: {e}")
-        continue
+                except Exception as e:
+                    logging.error(f"Error procesando par {par}: {e}")
+                    continue
 
         except Exception as e:
             logging.error(f"Error general en loop_operaciones: {e}")
