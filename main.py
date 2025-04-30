@@ -1,14 +1,12 @@
 import os
 import asyncio
 import logging
-from datetime import datetime
 from kucoin.client import Market, Trade, User
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from dotenv import load_dotenv
 
-# Cargar variables de entorno
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 
@@ -23,71 +21,64 @@ dp = Dispatcher()
 
 user_client = User(API_KEY, SECRET_KEY, API_PASSPHRASE)
 market_client = Market()
-trade_client = Trade(key=API_KEY, secret=SECRET_KEY, passphrase=API_PASSPHRASE)
+trade_client = Trade(API_KEY, SECRET_KEY, API_PASSPHRASE)
 
-# Variables Globales
 bot_encendido = False
 operacion_activa = None
 pares = ["SHIB-USDT", "PEPE-USDT", "FLOKI-USDT", "DOGE-USDT"]
 trailing_stop_pct = -0.08
 
-# Teclado para Telegram
 keyboard = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="ð Encender Bot")],
-        [KeyboardButton(text="ð Apagar Bot")],
-        [KeyboardButton(text="ð° Saldo")],
-        [KeyboardButton(text="ð Estado Bot")],
-        [KeyboardButton(text="ð Estado de Orden Actual")],
+        [KeyboardButton(text="🚀 Encender Bot")],
+        [KeyboardButton(text="🛑 Apagar Bot")],
+        [KeyboardButton(text="💰 Saldo")],
+        [KeyboardButton(text="📊 Estado Bot")],
+        [KeyboardButton(text="📈 Estado de Orden Actual")],
     ],
     resize_keyboard=True
 )
 
-# Comandos de Telegram
 @dp.message(Command("start"))
 async def start(message: types.Message):
-    await message.answer("â Â¡Bienvenido al Zafrobot DinÃ¡mico Pro Scalping!", reply_markup=keyboard)
+    await message.answer("✅ ¡Bienvenido al Zafrobot Dinámico Pro Scalping!", reply_markup=keyboard)
 
 @dp.message()
 async def comandos_principales(message: types.Message):
     global bot_encendido, operacion_activa
 
-    if message.text == "ð° Saldo":
+    if message.text == "💰 Saldo":
         saldo = obtener_saldo_disponible()
-        await message.answer(f"ð° Tu saldo disponible es: {saldo:.2f} USDT")
+        await message.answer(f"💰 Tu saldo disponible es: {saldo:.2f} USDT")
 
-    elif message.text == "ð Encender Bot":
+    elif message.text == "🚀 Encender Bot":
         if not bot_encendido:
             bot_encendido = True
-            await message.answer("â Bot encendido. Analizando oportunidades...")
+            await message.answer("✅ Bot encendido. Analizando oportunidades...")
             asyncio.create_task(loop_operaciones())
         else:
-            await message.answer("â ï¸ El bot ya estÃ¡ encendido.")
+            await message.answer("⚠️ El bot ya está encendido.")
 
-    elif message.text == "ð Apagar Bot":
+    elif message.text == "🛑 Apagar Bot":
         bot_encendido = False
-        await message.answer("ð Bot apagado manualmente.")
+        await message.answer("🛑 Bot apagado manualmente.")
 
-    elif message.text == "ð Estado Bot":
-        estado = "â ENCENDIDO" if bot_encendido else "ð APAGADO"
-        await message.answer(f"ð Estado actual del bot: {estado}")
+    elif message.text == "📊 Estado Bot":
+        estado = "✅ ENCENDIDO" if bot_encendido else "🛑 APAGADO"
+        await message.answer(f"📊 Estado actual del bot: {estado}")
 
-    elif message.text == "ð Estado de Orden Actual":
+    elif message.text == "📈 Estado de Orden Actual":
         if operacion_activa:
-            estado = "GANANCIA â" if operacion_activa["ganancia"] >= 0 else "PÃRDIDA â"
+            estado = "GANANCIA ✅" if operacion_activa["ganancia"] >= 0 else "PÉRDIDA ❌"
             await message.answer(
-                f"ð OperaciÃ³n activa en {operacion_activa['par']}
-"
-                f"Entrada: {operacion_activa['entrada']:.6f} USDT
-"
-                f"Actual: {operacion_activa['actual']:.6f} USDT
-"
+                f"📈 Operación activa en {operacion_activa['par']}\n"
+                f"Entrada: {operacion_activa['entrada']:.6f} USDT\n"
+                f"Actual: {operacion_activa['actual']:.6f} USDT\n"
                 f"Ganancia: {operacion_activa['ganancia']:.6f} USDT ({estado})"
             )
         else:
-            await message.answer("â ï¸ No hay operaciones activas actualmente.")
+            await message.answer("⚠️ No hay operaciones activas actualmente.")
 
-# Funciones de Trading
 def obtener_saldo_disponible():
     try:
         cuentas = user_client.get_account_list()
@@ -118,7 +109,7 @@ async def loop_operaciones():
                     volumen_24h = float(ticker.get("volValue", 0))
 
                     if volumen_24h == 0 or precio_actual == 0:
-                        logging.warning(f"â ï¸ Datos no vÃ¡lidos para {par}")
+                        logging.warning(f"⚠️ Datos no válidos para {par}")
                         continue
 
                     porcentaje_inversion = 0.8 if volumen_24h > 100000 else 0.5
@@ -129,7 +120,7 @@ async def loop_operaciones():
                     if monto_final < 5:
                         continue
 
-                    velas = market_client.get_kline(symbol=par, kline_type="1min", size=5)
+                    velas = market_client.get_kline(symbol=par, type="1min", limit=5)
                     precios = [float(v[2]) for v in velas]
                     if not precios:
                         continue
@@ -167,7 +158,7 @@ async def monitorear_salida():
     global operacion_activa
     precio_max = operacion_activa["entrada"]
 
-    while True:
+    while operacion_activa:
         try:
             ticker = market_client.get_ticker(operacion_activa["par"])
             precio_actual = float(ticker["price"])
@@ -195,7 +186,6 @@ async def monitorear_salida():
 
         await asyncio.sleep(2)
 
-# Ejecutar bot con reconexiÃ³n automÃ¡tica
 async def main():
     while True:
         try:
