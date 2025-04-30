@@ -18,7 +18,7 @@ API_PASSPHRASE = os.getenv("API_PASSPHRASE")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID = int(os.getenv("CHAT_ID", 0))
 
-bot = Bot(token=TELEGRAM_BOT_TOKEN)
+bot = Bot(token=TELEGRAM_BOT_TOKEN, parse_mode="Markdown")
 dp = Dispatcher()
 market_client = Market()
 trade_client = Trade(key=API_KEY, secret=SECRET_KEY, passphrase=API_PASSPHRASE)
@@ -74,12 +74,9 @@ async def comandos(message: types.Message):
         if operacion_activa:
             estado = "GANANCIA ✅" if operacion_activa["ganancia"] >= 0 else "PÉRDIDA ❌"
             await message.answer(
-                f"📈 Operación activa en {operacion_activa['par']}
-"
-                f"Entrada: {operacion_activa['entrada']:.6f} USDT
-"
-                f"Actual: {operacion_activa['actual']:.6f} USDT
-"
+                f"📈 Operación activa en {operacion_activa['par']}\n"
+                f"Entrada: {operacion_activa['entrada']:.6f} USDT\n"
+                f"Actual: {operacion_activa['actual']:.6f} USDT\n"
                 f"Ganancia: {operacion_activa['ganancia']:.6f} USDT ({estado})"
             )
         else:
@@ -146,7 +143,7 @@ async def loop_operaciones():
                         mejor_par = par
                         mejor_puntaje = puntaje
 
-                except Exception as e:
+                except Exception:
                     continue
 
             if mejor_par and not operacion_activa:
@@ -170,14 +167,9 @@ async def loop_operaciones():
                         "ganancia": 0.0
                     }
 
-                    await bot.send_message(CHAT_ID,
-                        f"✅ COMPRA EJECUTADA
-
-Par: {mejor_par}
-Entrada: {precio_actual}
-Cantidad: {cantidad}
-
-Esperando oportunidad de salida..."
+                    await bot.send_message(
+                        CHAT_ID,
+                        f"✅ *COMPRA EJECUTADA*\n\nPar: `{mejor_par}`\nEntrada: `{precio_actual}`\nCantidad: `{cantidad}`\n\n_Esperando oportunidad de salida..._"
                     )
                     await monitorear_salida()
 
@@ -210,20 +202,15 @@ async def monitorear_salida():
                     side="sell",
                     size=str(operacion_activa["cantidad"])
                 )
-                resultado = "GANANCIA ✅" if ganancia >= 0 else "PÉRDIDA ❌"
+                resultado = "✅ *GANANCIA*" if ganancia >= 0 else "❌ *PÉRDIDA*"
                 if ganancia >= 0:
                     historial_operaciones["ganadas"] += 1
                 else:
                     historial_operaciones["perdidas"] += 1
 
-                await bot.send_message(CHAT_ID,
-                    f"📤 VENTA COMPLETADA
-
-Par: {operacion_activa['par']}
-Salida: {precio_actual}
-Ganancia: {ganancia:.4f} USDT
-
-Resultado: {resultado}"
+                await bot.send_message(
+                    CHAT_ID,
+                    f"📤 *VENTA COMPLETADA*\n\nPar: `{operacion_activa['par']}`\nSalida: `{precio_actual}`\nGanancia: `{ganancia:.4f} USDT`\n\nResultado: {resultado}"
                 )
                 operacion_activa = None
                 break
