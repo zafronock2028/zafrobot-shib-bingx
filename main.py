@@ -40,7 +40,7 @@ keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🚀 Encender Bot")],
         [KeyboardButton(text="🛑 Apagar Bot")],
-        [KeyboardButton(text="💰 Saldo")],
+        [KeyboardButton(text="💰 Saldo"), KeyboardButton(text="🔄 Refresh Saldo")],
         [KeyboardButton(text="📊 Estado Bot")],
         [KeyboardButton(text="📈 Estado de Orden Actual")]
     ],
@@ -55,9 +55,9 @@ async def start(message: types.Message):
 async def comandos(message: types.Message):
     global bot_encendido
 
-    if message.text == "💰 Saldo":
+    if message.text in ["💰 Saldo", "🔄 Refresh Saldo"]:
         saldo = obtener_saldo_disponible()
-        await message.answer(f"💰 Tu saldo disponible es: {saldo:.2f} USDT")
+        await message.answer(f"💰 *Saldo actual:* `{saldo:.2f} USDT`")
 
     elif message.text == "🚀 Encender Bot":
         if not bot_encendido:
@@ -81,16 +81,14 @@ async def comandos(message: types.Message):
             for op in operaciones_activas:
                 estado = "GANANCIA ✅" if op["ganancia"] >= 0 else "PÉRDIDA ❌"
                 mensaje += (
-                    f"📈 Par: {op['par']}\n"
-                    f"Entrada: {op['entrada']:.6f} USDT\n"
-                    f"Actual: {op['actual']:.6f} USDT\n"
-                    f"Ganancia: {op['ganancia']:.6f} USDT ({estado})\n\n"
+                    f"📈 *Par:* `{op['par']}`\n"
+                    f"Entrada: `{op['entrada']:.6f}` USDT\n"
+                    f"Actual: `{op['actual']:.6f}` USDT\n"
+                    f"Ganancia: `{op['ganancia']:.6f}` USDT ({estado})\n\n"
                 )
             await message.answer(mensaje)
         else:
-            await message.answer("⚠️ No hay operaciones activas actualmente.")
-
-def obtener_saldo_disponible():
+            await message.answer("⚠️ No hay operaciones activas actualmente.")def obtener_saldo_disponible():
     try:
         cuentas = user_client.get_account_list()
         saldo = next((float(x["available"]) for x in cuentas if x["currency"] == "USDT"), 0.0)
@@ -100,8 +98,12 @@ def obtener_saldo_disponible():
         return 0.0
 
 def calcular_kelly(win_rate, avg_win=1, avg_loss=1):
-    kelly = (win_rate * avg_win - (1 - win_rate)) / avg_loss
-    return max(min(kelly, 1), 0.05)
+    try:
+        kelly = (win_rate * avg_win - (1 - win_rate)) / avg_loss
+        return max(min(kelly, 1), 0.05)
+    except Exception as e:
+        logging.error(f"Error en cálculo de Kelly: {e}")
+        return 0.05
 
 async def loop_operaciones():
     global bot_encendido, operaciones_activas
@@ -116,7 +118,8 @@ async def loop_operaciones():
             await asyncio.sleep(5)
             continue
 
-        win_rate = historial_operaciones["ganadas"] / (historial_operaciones["ganadas"] + historial_operaciones["perdidas"])
+        total_ops = historial_operaciones["ganadas"] + historial_operaciones["perdidas"]
+        win_rate = historial_operaciones["ganadas"] / total_ops if total_ops > 0 else 1
         porcentaje_kelly = calcular_kelly(win_rate)
 
         for par in pares:
@@ -139,8 +142,7 @@ async def loop_operaciones():
                     }
                     operaciones_activas.append(operacion)
                     logging.info(f"🟢 COMPRA: {par} | Entrada: {info['precio']} | Cantidad: {cantidad}")
-                    await bot.send_message(CHAT_ID, f"🟢 COMPRA EJECUTADA\nPar: {par}\nEntrada: {info['precio']:.6f} USDT")
-
+                    await bot.send_message(CHAT_ID, f"🟢 *COMPRA EJECUTADA*\nPar: `{par}`\nEntrada: `{info['precio']:.6f}` USDT")
                     asyncio.create_task(monitorear_salida(operacion))
         await asyncio.sleep(3)
 
@@ -198,7 +200,10 @@ async def monitorear_salida(operacion):
                 historial_operaciones["ganadas" if cambio_pct > 0 else "perdidas"] += 1
 
                 logging.info(f"🔴 VENTA: {par} | Salida: {actual} | Ganancia: {operacion['ganancia']:.4f}")
-                await bot.send_message(CHAT_ID, f"🔴 VENTA EJECUTADA\nPar: {par}\nSalida: {actual:.6f} USDT\nGanancia: {operacion['ganancia']:.4f} USDT")
+                await bot.send_message(
+                    CHAT_ID,
+                    f"🔴 *VENTA EJECUTADA*\nPar: `{par}`\nSalida: `{actual:.6f}` USDT\nGanancia: `{operacion['ganancia']:.4f}` USDT"
+                )
                 break
             await asyncio.sleep(5)
     except Exception as e:
@@ -206,7 +211,6 @@ async def monitorear_salida(operacion):
         if operacion in operaciones_activas:
             operaciones_activas.remove(operacion)
 
-# Ejecutar el bot de Telegram
+# Iniciar el bot
 if __name__ == "__main__":
-    import asyncio
     asyncio.run(dp.start_polling(bot))
