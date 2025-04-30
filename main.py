@@ -108,9 +108,14 @@ async def loop_operaciones():
                     ticker = market_client.get_ticker(par)
                     precio_actual = float(ticker.get("price", 0))
 
-                    stats = market_client.get_24hr_stats(par)
-                    volumen_24h = float(stats.get("volValue", 0))
+                    from kucoin.client import Market
 
+market_client = Market()
+datos = market_client.get_24h_stats(symbol="SHIB-USDT")
+
+precio = float(datos.get("last", 0))
+volumen_usdt = float(datos.get("volValue", 0))  # Volumen en USDT
+volumen_token = float(datos.get("vol", 0))      # Volumen en cantidad del token
                     logging.info(f"🧠 Analizando {par} | Precio: {precio_actual} | Volumen 24h: {volumen_24h}")
 
                     if volumen_24h == 0 or precio_actual == 0:
