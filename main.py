@@ -30,7 +30,9 @@ trailing_stop_pct = -0.08
 ganancia_objetivo = 0.008
 historial_operaciones = {"ganadas": 1, "perdidas": 1}
 min_orden_usdt = 3.0
-max_orden_usdt = 6.0keyboard = ReplyKeyboardMarkup(
+max_orden_usdt = 6.0
+
+keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🚀 Encender Bot")],
         [KeyboardButton(text="⛔ Apagar Bot")],
