@@ -113,16 +113,17 @@ async def loop_operaciones():
 market_client = Market()
 datos = market_client.get_24h_stats(symbol=par)
 
-precio = float(datos.get("last", 0))
+precio_actual = float(datos.get("last", 0))
 volumen_usdt = float(datos.get("volValue", 0))  # Volumen en USDT
 volumen_token = float(datos.get("vol", 0))      # Volumen en cantidad del token
-                    logging.info(f"🧠 Analizando {par} | Precio: {precio_actual} | Volumen 24h: {volumen_24h}")
 
-                    if volumen_24h == 0 or precio_actual == 0:
-                        logging.warning(f"⚠️ Datos no válidos para {par}")
-                        continue
+logging.info(f"🧠 Analizando {par} | Precio: {precio_actual} | Volumen 24h: {volumen_usdt}")
 
-                    porcentaje = 0.8 if volumen_24h > 100000 else 0.5
+if volumen_usdt == 0 or precio_actual == 0:
+    logging.warning(f"⚠️ Datos no válidos para {par}")
+    continue
+
+porcentaje = 0.8 if volumen_usdt > 100000 else 0.5
                     monto_uso = saldo * porcentaje
                     maximo = volumen_24h * 0.04
                     monto_final = min(monto_uso, maximo)
