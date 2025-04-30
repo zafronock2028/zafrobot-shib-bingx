@@ -8,7 +8,7 @@ from aiogram.filters import Command
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from dotenv import load_dotenv
 
-# Cargar variables de entorno
+# Configuración inicial
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 
@@ -20,10 +20,9 @@ CHAT_ID = int(os.getenv("CHAT_ID", 0))
 
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 dp = Dispatcher()
-
-user_client = User(API_KEY, SECRET_KEY, API_PASSPHRASE)
 market_client = Market()
 trade_client = Trade(key=API_KEY, secret=SECRET_KEY, passphrase=API_PASSPHRASE)
+user_client = User(API_KEY, SECRET_KEY, API_PASSPHRASE)
 
 bot_encendido = False
 operacion_activa = None
@@ -36,7 +35,7 @@ keyboard = ReplyKeyboardMarkup(
         [KeyboardButton(text="🛑 Apagar Bot")],
         [KeyboardButton(text="💰 Saldo")],
         [KeyboardButton(text="📊 Estado Bot")],
-        [KeyboardButton(text="📈 Estado de Orden Actual")],
+        [KeyboardButton(text="📈 Estado de Orden Actual")]
     ],
     resize_keyboard=True
 )
@@ -46,7 +45,7 @@ async def start(message: types.Message):
     await message.answer("✅ ¡Bienvenido al Zafrobot Dinámico Pro Scalping!", reply_markup=keyboard)
 
 @dp.message()
-async def comandos_principales(message: types.Message):
+async def comandos(message: types.Message):
     global bot_encendido, operacion_activa
 
     if message.text == "💰 Saldo":
@@ -73,12 +72,9 @@ async def comandos_principales(message: types.Message):
         if operacion_activa:
             estado = "GANANCIA ✅" if operacion_activa["ganancia"] >= 0 else "PÉRDIDA ❌"
             await message.answer(
-                f"📈 Operación activa en {operacion_activa['par']}
-"
-                f"Entrada: {operacion_activa['entrada']:.6f} USDT
-"
-                f"Actual: {operacion_activa['actual']:.6f} USDT
-"
+                f"📈 Operación activa en {operacion_activa['par']}\n"
+                f"Entrada: {operacion_activa['entrada']:.6f} USDT\n"
+                f"Actual: {operacion_activa['actual']:.6f} USDT\n"
                 f"Ganancia: {operacion_activa['ganancia']:.6f} USDT ({estado})"
             )
         else:
@@ -87,8 +83,8 @@ async def comandos_principales(message: types.Message):
 def obtener_saldo_disponible():
     try:
         cuentas = user_client.get_account_list()
-        saldo_usdt = next((float(x['available']) for x in cuentas if x['currency'] == "USDT" and x['type'] == "trade"), 0.0)
-        return saldo_usdt
+        saldo = next((float(x['available']) for x in cuentas if x['currency'] == "USDT" and x['type'] == "trade"), 0.0)
+        return saldo
     except Exception as e:
         logging.error(f"Error obteniendo saldo: {e}")
         return 0.0
@@ -109,9 +105,9 @@ async def loop_operaciones():
                     break
 
                 try:
-                    stats = market_client.get_24h_stats(par)
-                    precio_actual = float(stats.get("last", 0))
-                    volumen_24h = float(stats.get("volValue", 0))
+                    ticker = market_client.get_ticker(par)
+                    precio_actual = float(ticker.get("price", 0))
+                    volumen_24h = float(ticker.get("volValue", 0))
 
                     logging.info(f"🧠 Analizando {par} | Precio: {precio_actual} | Volumen 24h: {volumen_24h}")
 
@@ -119,10 +115,10 @@ async def loop_operaciones():
                         logging.warning(f"⚠️ Datos no válidos para {par}")
                         continue
 
-                    porcentaje_inversion = 0.8 if volumen_24h > 100000 else 0.5
-                    monto_usar = saldo * porcentaje_inversion
-                    monto_max_volumen = volumen_24h * 0.04
-                    monto_final = min(monto_usar, monto_max_volumen)
+                    porcentaje = 0.8 if volumen_24h > 100000 else 0.5
+                    monto_uso = saldo * porcentaje
+                    maximo = volumen_24h * 0.04
+                    monto_final = min(monto_uso, maximo)
 
                     if monto_final < 5:
                         continue
@@ -132,8 +128,8 @@ async def loop_operaciones():
                     if not precios:
                         continue
 
-                    promedio_precio = sum(precios) / len(precios)
-                    if precio_actual < promedio_precio:
+                    promedio = sum(precios) / len(precios)
+                    if precio_actual < promedio:
                         cantidad = round(monto_final / precio_actual, 2)
                         trade_client.create_market_order(
                             symbol=par,
@@ -167,8 +163,8 @@ async def monitorear_salida():
 
     while True:
         try:
-            stats = market_client.get_24h_stats(operacion_activa["par"])
-            precio_actual = float(stats["last"])
+            ticker = market_client.get_ticker(operacion_activa["par"])
+            precio_actual = float(ticker["price"])
             if precio_actual > precio_max:
                 precio_max = precio_actual
 
@@ -178,6 +174,8 @@ async def monitorear_salida():
             ganancia_actual = (precio_actual - operacion_activa["entrada"]) * operacion_activa["cantidad"]
             operacion_activa["actual"] = precio_actual
             operacion_activa["ganancia"] = ganancia_actual
+
+            logging.info(f"💹 Operación activa en {operacion_activa['par']} | Actual: {precio_actual} | Ganancia: {ganancia_actual:.4f}")
 
             if variacion >= 0.02 or retroceso <= trailing_stop_pct:
                 trade_client.create_market_order(
