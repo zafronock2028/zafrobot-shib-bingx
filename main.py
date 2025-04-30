@@ -1,3 +1,4 @@
+import os
 import logging
 import asyncio
 from aiogram import Bot, Dispatcher, types
@@ -5,13 +6,14 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.filters import Command
 from kucoin.client import Market, Trade, User
 
-# Reemplaza estas variables con tus valores reales
-API_KEY = "TU_API_KEY"
-SECRET_KEY = "TU_SECRET_KEY"
-API_PASS = "TU_API_PASS"
-CHAT_ID = "TU_CHAT_ID"
-TOKEN = "TU_BOT_TOKEN"
+# Cargar variables de entorno
+API_KEY = os.getenv("API_KEY")
+SECRET_KEY = os.getenv("SECRET_KEY")
+API_PASS = os.getenv("API_PASSPHRASE")
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
 
+# Inicializar bot y KuCoin
 bot = Bot(token=TOKEN, parse_mode="Markdown")
 dp = Dispatcher()
 
@@ -33,6 +35,7 @@ historial_operaciones = {"ganadas": 1, "perdidas": 1}
 min_orden_usdt = 3.0
 max_orden_usdt = 6.0
 
+# Teclado
 keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🚀 Encender Bot")],
@@ -44,6 +47,7 @@ keyboard = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
+# Comandos
 @dp.message(Command("start"))
 async def start(message: types.Message):
     await message.answer("✅ ¡Bienvenido al Zafrobot Scalper V1!", reply_markup=keyboard)
@@ -87,6 +91,7 @@ async def comandos(message: types.Message):
         else:
             await message.answer("⚠️ No hay operaciones activas actualmente.")
 
+# Funciones de operación
 async def obtener_saldo_disponible():
     try:
         cuentas = user_client.get_account_list()
@@ -163,7 +168,7 @@ async def loop_operaciones():
                     }
                     operaciones_activas.append(operacion)
 
-                    logging.info(f"✅ COMPRA EJECUTADA en {par} | Entrada: {analisis['precio']} | Cantidad: {cantidad}")
+                    logging.info(f"✅ COMPRA EJECUTADA en {par}")
                     await bot.send_message(
                         CHAT_ID,
                         f"✅ *COMPRA EJECUTADA*\nPar: `{par}`\nEntrada: `{analisis['precio']:.6f}`\nCantidad: `{cantidad}`"
@@ -203,7 +208,7 @@ async def monitorear_salida(operacion):
                 else:
                     historial_operaciones["perdidas"] += 1
 
-                logging.info(f"🔴 VENTA en {par} | Salida: {actual} | Resultado: {resultado}")
+                logging.info(f"🔴 VENTA en {par} | Resultado: {resultado}")
                 await bot.send_message(
                     CHAT_ID,
                     f"🔴 *VENTA EJECUTADA*\nPar: `{par}`\nSalida: `{actual:.6f}`\nGanancia: `{ganancia:.4f} USDT`\nResultado: {resultado}"
@@ -213,7 +218,7 @@ async def monitorear_salida(operacion):
             logging.error(f"Error monitoreando salida de {par}: {e}")
         await asyncio.sleep(4)
 
-# Ejecutar bot
+# Iniciar bot
 async def main():
     logging.basicConfig(level=logging.INFO)
     await dp.start_polling(bot)
