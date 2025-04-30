@@ -1,12 +1,14 @@
 import os
 import asyncio
 import logging
+from datetime import datetime
 from kucoin.client import Market, Trade, User
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from dotenv import load_dotenv
 
+# Cargar variables de entorno
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 
@@ -21,7 +23,7 @@ dp = Dispatcher()
 
 user_client = User(API_KEY, SECRET_KEY, API_PASSPHRASE)
 market_client = Market()
-trade_client = Trade(API_KEY, SECRET_KEY, API_PASSPHRASE)
+trade_client = Trade(key=API_KEY, secret=SECRET_KEY, passphrase=API_PASSPHRASE)
 
 bot_encendido = False
 operacion_activa = None
@@ -71,9 +73,12 @@ async def comandos_principales(message: types.Message):
         if operacion_activa:
             estado = "GANANCIA ✅" if operacion_activa["ganancia"] >= 0 else "PÉRDIDA ❌"
             await message.answer(
-                f"📈 Operación activa en {operacion_activa['par']}\n"
-                f"Entrada: {operacion_activa['entrada']:.6f} USDT\n"
-                f"Actual: {operacion_activa['actual']:.6f} USDT\n"
+                f"📈 Operación activa en {operacion_activa['par']}
+"
+                f"Entrada: {operacion_activa['entrada']:.6f} USDT
+"
+                f"Actual: {operacion_activa['actual']:.6f} USDT
+"
                 f"Ganancia: {operacion_activa['ganancia']:.6f} USDT ({estado})"
             )
         else:
@@ -120,7 +125,7 @@ async def loop_operaciones():
                     if monto_final < 5:
                         continue
 
-                    velas = market_client.get_kline(symbol=par, type="1min", limit=5)
+                    velas = market_client.get_kline(symbol=par, kline_type="1min", size=5)
                     precios = [float(v[2]) for v in velas]
                     if not precios:
                         continue
@@ -140,6 +145,13 @@ async def loop_operaciones():
                             "actual": precio_actual,
                             "ganancia": 0.0
                         }
+                        await bot.send_message(
+                            CHAT_ID,
+                            f"✅ COMPRA realizada
+Par: {par}
+Cantidad: {cantidad}
+Precio: {precio_actual:.6f} USDT"
+                        )
                         await monitorear_salida()
                         break
 
@@ -158,7 +170,7 @@ async def monitorear_salida():
     global operacion_activa
     precio_max = operacion_activa["entrada"]
 
-    while operacion_activa:
+    while True:
         try:
             ticker = market_client.get_ticker(operacion_activa["par"])
             precio_actual = float(ticker["price"])
@@ -177,6 +189,13 @@ async def monitorear_salida():
                     symbol=operacion_activa["par"],
                     side="sell",
                     size=str(operacion_activa["cantidad"])
+                )
+                await bot.send_message(
+                    CHAT_ID,
+                    f"✅ VENTA realizada
+Par: {operacion_activa['par']}
+Precio: {precio_actual:.6f} USDT
+Ganancia: {operacion_activa['ganancia']:.6f} USDT"
                 )
                 operacion_activa = None
                 break
