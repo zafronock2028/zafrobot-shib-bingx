@@ -145,7 +145,9 @@ async def loop_operaciones():
                     await bot.send_message(CHAT_ID, f"🟢 COMPRA EJECUTADA\nPar: {par}\nEntrada: {info['precio']:.6f} USDT")
 
                     asyncio.create_task(monitorear_salida(operacion))
-        await asyncio.sleep(3)def analizar_par(par):
+        await asyncio.sleep(3)
+
+def analizar_par(par):
     try:
         velas = market_client.get_kline(symbol=par, kline_type="1min", limit=5)
         precios = [float(x[2]) for x in velas]
