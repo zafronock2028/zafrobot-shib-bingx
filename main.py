@@ -36,8 +36,7 @@ trailing_stop_pct = -0.08
 ganancia_objetivo = 0.008
 historial_operaciones = {"ganadas": 1, "perdidas": 1}
 min_orden_usdt = 3.0
-max_orden_usdt = 6.0
-# Teclado principal sin botón duplicado de saldo
+max_orden_usdt = 6.0# Teclado principal sin botón duplicado de saldo
 keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🚀 Encender Bot")],
@@ -92,9 +91,7 @@ async def comandos(message: types.Message):
                 )
             await message.answer(mensaje)
         else:
-            await message.answer("⚠️ No hay operaciones activas actualmente.")
-
-def obtener_saldo_disponible():
+            await message.answer("⚠️ No hay operaciones activas actualmente.")def obtener_saldo_disponible():
     try:
         cuentas = user_client.get_account_list()
         saldo = next((float(x["available"]) for x in cuentas if x["currency"] == "USDT"), 0.0)
@@ -104,7 +101,7 @@ def obtener_saldo_disponible():
         return 0.0
 
 def calcular_kelly(win_rate, avg_win=1, avg_loss=1):
-    kelly = (win_rate * avg_win - (1 - win_rate)) / avg_loss
+    kelly = (win_rate * avg_win - (1 - win_rate) * avg_loss) / avg_win
     return max(min(kelly, 1), 0.05)
 
 async def loop_operaciones():
@@ -116,11 +113,13 @@ async def loop_operaciones():
             continue
 
         saldo = obtener_saldo_disponible()
-        if saldo < 5:
+        if saldo < min_orden_usdt:
             await asyncio.sleep(5)
             continue
 
-        porcentaje_inversion_fija = 1 / max_operaciones
+        total_ops = historial_operaciones["ganadas"] + historial_operaciones["perdidas"]
+        win_rate = historial_operaciones["ganadas"] / total_ops if total_ops > 0 else 0.5
+        porcentaje_kelly = calcular_kelly(win_rate)
 
         for par in pares:
             if len(operaciones_activas) >= max_operaciones:
@@ -128,9 +127,12 @@ async def loop_operaciones():
 
             info = analizar_par(par)
             if info["puntaje"] >= 2:
-                monto_inversion = saldo * porcentaje_inversion_fija
-                if monto_inversion < 5:
-                    logging.info(f"⛔ Monto insuficiente para operar {par}: {monto_inversion:.2f} USDT")
+                monto_inversion = min(
+                    saldo * porcentaje_kelly,
+                    saldo / (max_operaciones - len(operaciones_activas)),
+                    max_orden_usdt
+                )
+                if monto_inversion < min_orden_usdt:
                     continue
 
                 cantidad = monto_inversion / info["precio"]
@@ -146,12 +148,13 @@ async def loop_operaciones():
                     }
                     operaciones_activas.append(operacion)
                     logging.info(f"🟢 COMPRA: {par} | Entrada: {info['precio']} | Cantidad: {cantidad}")
-                    await bot.send_message(CHAT_ID, f"🟢 *COMPRA EJECUTADA*\nPar: `{par}`\nEntrada: `{info['precio']:.6f}` USDT")
-
+                    await bot.send_message(
+                        CHAT_ID,
+                        f"🟢 *COMPRA EJECUTADA*\nPar: `{par}`\nEntrada: `{info['precio']:.6f}`\nCantidad: `{cantidad:.2f}`"
+                    )
                     asyncio.create_task(monitorear_salida(operacion))
-        await asyncio.sleep(3)
 
-def analizar_par(par):
+        await asyncio.sleep(3)def analizar_par(par):
     try:
         velas = market_client.get_kline(symbol=par, kline_type="1min", limit=5)
         precios = [float(x[2]) for x in velas]
@@ -204,11 +207,10 @@ async def monitorear_salida(operacion):
                 operaciones_activas.remove(operacion)
                 historial_operaciones["ganadas" if cambio_pct > 0 else "perdidas"] += 1
 
-                resultado = "✅ GANANCIA" if cambio_pct > 0 else "❌ PÉRDIDA"
-                logging.info(f"🔴 VENTA: {par} | Salida: {actual:.6f} | Ganancia: {operacion['ganancia']:.4f}")
+                logging.info(f"🔴 VENTA: {par} | Salida: {actual} | Ganancia: {operacion['ganancia']:.4f}")
                 await bot.send_message(
                     CHAT_ID,
-                    f"🔴 VENTA EJECUTADA\nPar: {par}\nSalida: {actual:.6f} USDT\nGanancia: {operacion['ganancia']:.4f} USDT\nResultado: {resultado}"
+                    f"🔴 *VENTA EJECUTADA*\nPar: `{par}`\nSalida: `{actual:.6f}`\nGanancia: `{operacion['ganancia']:.4f}`"
                 )
                 break
             await asyncio.sleep(5)
@@ -217,6 +219,7 @@ async def monitorear_salida(operacion):
         if operacion in operaciones_activas:
             operaciones_activas.remove(operacion)
 
-# Iniciar el bot
+# Ejecutar el bot de Telegram
 if __name__ == "__main__":
+    import asyncio
     asyncio.run(dp.start_polling(bot))
