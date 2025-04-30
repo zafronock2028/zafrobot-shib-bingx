@@ -83,8 +83,10 @@ async def comandos(message: types.Message):
                     f"Ganancia: {op['ganancia']:.6f} USDT ({estado})\n\n"
                 )
             await message.answer(mensaje)
-        else:
-            await message.answer("⚠️ No hay operaciones activas actualmente.")def obtener_saldo_disponible():
+                else:
+            await message.answer("⚠️ No hay operaciones activas actualmente.")
+
+def obtener_saldo_disponible():
     try:
         cuentas = user_client.get_account_list()
         saldo = next((float(x["available"]) for x in cuentas if x["currency"] == "USDT"), 0.0)
