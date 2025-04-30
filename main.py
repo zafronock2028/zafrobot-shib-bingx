@@ -1,7 +1,7 @@
 import os
 import logging
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.filters import Command
@@ -140,7 +140,6 @@ def analizar_par(par):
 
 async def loop_operaciones():
     global bot_encendido, operaciones_activas
-
     while bot_encendido:
         if len(operaciones_activas) >= max_operaciones:
             await asyncio.sleep(5)
@@ -183,7 +182,6 @@ async def loop_operaciones():
 
 async def monitorear_salida(operacion):
     global operaciones_activas, historial_operaciones
-
     entrada = operacion["entrada"]
     cantidad = operacion["cantidad"]
     par = operacion["par"]
@@ -220,9 +218,59 @@ async def monitorear_salida(operacion):
             logging.error(f"Error monitoreando salida de {par}: {e}")
         await asyncio.sleep(4)
 
+# Función de resumen diario
+async def resumen_diario_y_reset():
+    global bot_encendido, operaciones_activas, historial_operaciones
+
+    while True:
+        ahora = datetime.now()
+        mañana = ahora + timedelta(days=1)
+        proximo_reset = datetime(mañana.year, mañana.month, mañana.day, 0, 0)
+        espera = (proximo_reset - ahora).total_seconds()
+        await asyncio.sleep(espera)
+
+        if operaciones_activas:
+            for op in list(operaciones_activas):
+                try:
+                    trade_client.create_market_order(symbol=op['par'], side="sell", size=str(op['cantidad']))
+                    operaciones_activas.remove(op)
+                    resultado = "✅ GANADA" if op["ganancia"] >= 0 else "❌ PERDIDA"
+                    saldo_actual = await obtener_saldo_disponible()
+                    historial_operaciones.append({
+                        "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                        "par": op["par"],
+                        "ganancia": op["ganancia"],
+                        "resultado": resultado,
+                        "saldo": saldo_actual
+                    })
+                    await bot.send_message(
+                        CHAT_ID,
+                        f"🔴 *CIERRE FORZADO*\nPar: `{op['par']}`\nPrecio: `{op['actual']:.6f}`\nGanancia: `{op['ganancia']:.4f} USDT`\nResultado: {resultado}"
+                    )
+                except Exception as e:
+                    logging.error(f"Error en cierre forzado: {e}")
+
+        if historial_operaciones:
+            mensaje = "📊 *Resumen Diario Zafrobot*\n\n"
+            total = 0
+            for h in historial_operaciones:
+                total += h["ganancia"]
+                mensaje += (
+                    f"{h['fecha']} | {h['par']} | {h['resultado']} | "
+                    f"{h['ganancia']:.4f} USDT | Saldo: {h['saldo']:.2f}\n"
+                )
+            mensaje += f"\n🧮 *Ganancia Total del Día:* `{total:.4f} USDT`"
+            await bot.send_message(CHAT_ID, mensaje)
+
+        historial_operaciones.clear()
+        operaciones_activas.clear()
+        bot_encendido = True
+        logging.info("Nuevo ciclo diario iniciado.")
+
 # Iniciar bot
 async def main():
     logging.basicConfig(level=logging.INFO)
+    asyncio.create_task(resumen_diario_y_reset())
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
