@@ -111,7 +111,7 @@ async def loop_operaciones():
                     from kucoin.client import Market
 
 market_client = Market()
-datos = market_client.get_24h_stats(symbol="SHIB-USDT")
+datos = market_client.get_24h_stats(symbol=par)
 
 precio = float(datos.get("last", 0))
 volumen_usdt = float(datos.get("volValue", 0))  # Volumen en USDT
