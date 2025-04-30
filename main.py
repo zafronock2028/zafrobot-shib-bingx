@@ -116,12 +116,11 @@ async def loop_operaciones():
             continue
 
         saldo = obtener_saldo_disponible()
-        if saldo < min_orden_usdt:
+        if saldo < 5:
             await asyncio.sleep(5)
             continue
 
-        win_rate = historial_operaciones["ganadas"] / (historial_operaciones["ganadas"] + historial_operaciones["perdidas"])
-        porcentaje_kelly = calcular_kelly(win_rate)
+        porcentaje_inversion_fija = 1 / max_operaciones
 
         for par in pares:
             if len(operaciones_activas) >= max_operaciones:
@@ -129,8 +128,8 @@ async def loop_operaciones():
 
             info = analizar_par(par)
             if info["puntaje"] >= 2:
-                monto_inversion = min(saldo * porcentaje_kelly, saldo / (max_operaciones - len(operaciones_activas)))
-                if monto_inversion < min_orden_usdt:
+                monto_inversion = saldo * porcentaje_inversion_fija
+                if monto_inversion < 5:
                     logging.info(f"⛔ Monto insuficiente para operar {par}: {monto_inversion:.2f} USDT")
                     continue
 
@@ -147,7 +146,7 @@ async def loop_operaciones():
                     }
                     operaciones_activas.append(operacion)
                     logging.info(f"🟢 COMPRA: {par} | Entrada: {info['precio']} | Cantidad: {cantidad}")
-                    await bot.send_message(CHAT_ID, f"🟢 COMPRA EJECUTADA\nPar: {par}\nEntrada: {info['precio']:.6f} USDT")
+                    await bot.send_message(CHAT_ID, f"🟢 *COMPRA EJECUTADA*\nPar: `{par}`\nEntrada: `{info['precio']:.6f}` USDT")
 
                     asyncio.create_task(monitorear_salida(operacion))
         await asyncio.sleep(3)
