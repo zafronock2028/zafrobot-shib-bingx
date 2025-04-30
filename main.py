@@ -24,6 +24,8 @@ user_client = User(API_KEY, SECRET_KEY, API_PASS)
 bot_encendido = False
 operaciones_activas = []
 historial_operaciones = []
+ultimos_pares_operados = {}
+tiempo_espera_reentrada = 600  # 10 minutos
 max_operaciones = 3
 pares = [
     "SHIB-USDT", "PEPE-USDT", "FLOKI-USDT", "DOGE-USDT", "TRUMP-USDT",
@@ -35,7 +37,6 @@ trailing_stop_base = -0.08
 min_orden_usdt = 3.0
 max_orden_usdt = 6.0
 
-# Teclado Telegram
 keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🚀 Encender Bot")],
@@ -48,7 +49,6 @@ keyboard = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
-# Comandos
 @dp.message(Command("start"))
 async def start(message: types.Message):
     await message.answer("✅ ¡Bienvenido al Zafrobot Scalper V1 PRO!", reply_markup=keyboard)
@@ -104,7 +104,6 @@ async def comandos(message: types.Message):
         else:
             await message.answer("⚠️ Aún no hay historial de operaciones.")
 
-# Funciones principales
 async def obtener_saldo_disponible():
     try:
         cuentas = user_client.get_account_list()
@@ -130,14 +129,8 @@ def analizar_par(par):
         if volumen_24h > 500000:
             puntaje += 1
 
-        # Mostrar análisis solo en consola
         logging.info(f"[ANÁLISIS] {par} | Puntaje: {puntaje} | Precio: {actual:.8f} | Promedio: {promedio:.8f} | Volumen: {volumen_24h:.2f} | Spread: {spread:.5f}")
-        
-        return {
-            "puntaje": puntaje,
-            "precio": actual,
-            "volumen": volumen_24h
-        }
+        return {"puntaje": puntaje, "precio": actual, "volumen": volumen_24h}
     except Exception as e:
         logging.error(f"[Error] Analizando par {par}: {e}")
         return {"puntaje": 0, "precio": 0.0, "volumen": 0.0}
@@ -157,6 +150,12 @@ async def loop_operaciones():
         for par in pares:
             if len(operaciones_activas) >= max_operaciones:
                 break
+
+            # Bloquea reentrada inmediata
+            if par in ultimos_pares_operados:
+                tiempo_salida = ultimos_pares_operados[par]
+                if (datetime.now() - tiempo_salida).total_seconds() < tiempo_espera_reentrada:
+                    continue
 
             analisis = analizar_par(par)
             if analisis["puntaje"] >= 2:
@@ -181,7 +180,10 @@ async def loop_operaciones():
                     )
                     asyncio.create_task(monitorear_salida(operacion))
                 except Exception as e:
-                    logging.error(f"[Error] Ejecutando orden en {par}: {e}")
+                    if "orderSize" in str(e).lower():
+                        logging.warning(f"[OMITIDO] {par} - tamaño mínimo no alcanzado.")
+                    else:
+                        logging.error(f"[Error] Ejecutando orden en {par}: {e}")
         await asyncio.sleep(5)
 
 async def monitorear_salida(operacion):
@@ -204,6 +206,7 @@ async def monitorear_salida(operacion):
             if variacion >= ganancia_objetivo or ((actual - max_precio) / max_precio) <= trailing_stop_pct:
                 trade_client.create_market_order(symbol=par, side="sell", size=str(cantidad))
                 operaciones_activas.remove(operacion)
+                ultimos_pares_operados[par] = datetime.now()
                 resultado = "✅ GANADA" if ganancia >= 0 else "❌ PERDIDA"
                 saldo_actual = await obtener_saldo_disponible()
                 historial_operaciones.append({
@@ -222,7 +225,6 @@ async def monitorear_salida(operacion):
             logging.error(f"[Error] Monitoreando salida de {par}: {e}")
         await asyncio.sleep(4)
 
-# Función de resumen diario y cierre
 async def resumen_diario_y_reset():
     global bot_encendido, operaciones_activas, historial_operaciones
     while True:
@@ -237,6 +239,7 @@ async def resumen_diario_y_reset():
                 try:
                     trade_client.create_market_order(symbol=op['par'], side="sell", size=str(op['cantidad']))
                     operaciones_activas.remove(op)
+                    ultimos_pares_operados[op['par']] = datetime.now()
                     resultado = "✅ GANADA" if op["ganancia"] >= 0 else "❌ PERDIDA"
                     saldo_actual = await obtener_saldo_disponible()
                     historial_operaciones.append({
@@ -270,7 +273,6 @@ async def resumen_diario_y_reset():
         bot_encendido = True
         logging.info("Nuevo ciclo diario iniciado.")
 
-# Inicio
 async def main():
     logging.basicConfig(level=logging.INFO)
     asyncio.create_task(resumen_diario_y_reset())
