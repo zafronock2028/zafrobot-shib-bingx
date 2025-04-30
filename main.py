@@ -84,7 +84,9 @@ async def comandos(message: types.Message):
                 )
             await message.answer(mensaje)
         else:
-            await message.answer("⚠️ No hay operaciones activas actualmente.")async def obtener_saldo_disponible():
+            await message.answer("⚠️ No hay operaciones activas actualmente.")
+
+async def obtener_saldo_disponible():
     try:
         cuentas = user_client.get_account_list()
         saldo = next((float(x["available"]) for x in cuentas if x["currency"] == "USDT"), 0.0)
