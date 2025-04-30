@@ -48,9 +48,10 @@ keyboard = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
-@dp.message(Command("start"))
-async def start(message: types.Message):
-    await message.answer("✅ ¡Bienvenido al Zafrobot Scalper V1!", reply_markup=keyboard)@dp.message()
+# Registra los handlers en Aiogram 3
+dp.message.register(start, Command("start"))
+dp.message.register(comandos)
+
 async def comandos(message: types.Message):
     global bot_encendido
 
