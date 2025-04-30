@@ -5,11 +5,13 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.filters import Command
 from kucoin.client import Market, Trade, User
 
-API_KEY = "TU_API_KEY"
-SECRET_KEY = "TU_SECRET_KEY"
-API_PASS = "TU_API_PASS"
-CHAT_ID = "TU_CHAT_ID"
-TOKEN = "TU_BOT_TOKEN"
+import os
+
+API_KEY = os.getenv("API_KEY")
+SECRET_KEY = os.getenv("SECRET_KEY")
+API_PASS = os.getenv("API_PASSPHRASE")
+CHAT_ID = os.getenv("CHAT_ID")
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
 bot = Bot(token=TOKEN, parse_mode="Markdown")
 dp = Dispatcher()
