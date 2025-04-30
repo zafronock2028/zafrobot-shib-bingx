@@ -109,11 +109,7 @@ async def loop_operaciones():
 ticker = market_client.get_ticker(par)
 precio_actual = float(ticker.get("price", 0))
 
-# Obtener volumen 24h real en USDT desde la API de estadísticas
-stats = market_client.get_24h_stats(par)
-volumen_24h = float(stats.get("volValue", 0))
-
-# Obtener volumen real en USDT desde la API correcta
+# Obtener volumen 24h real en USDT desde la API correcta
 stats = market_client.get_24hr_stats(par)
 volumen_24h = float(stats.get("volValue", 0))
 
