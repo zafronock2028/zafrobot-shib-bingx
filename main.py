@@ -105,9 +105,9 @@ async def loop_operaciones():
                     break
 
                 try:
-                    ticker = market_client.get_ticker(par)
-                    precio_actual = float(ticker.get("price", 0))
-
+                    ticker = market_client.get_24hr_stats(par)
+precio_actual = float(ticker.get("last", 0))
+volumen_24h = float(ticker.get("volValue", 0))
                     from kucoin.client import Market
 
 market_client = Market()
