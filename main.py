@@ -105,9 +105,9 @@ async def loop_operaciones():
                     break
 
                 try:
-    datos = market_client.get_24hr_stats(symbol=par)
-    precio_actual = float(datos.get("last", 0))
-    volumen_24h = float(datos.get("volValue", 0))
+    ticker = market_client.get_ticker(symbol=par)
+precio_actual = float(ticker.get("price", 0))
+volumen_24h = float(ticker.get("volValue", 0))
 
     logging.info(f"🧠 Analizando {par} | Precio: {precio_actual} | Volumen 24h: {volumen_24h}")
 
