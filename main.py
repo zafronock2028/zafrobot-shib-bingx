@@ -109,6 +109,11 @@ async def loop_operaciones():
     precio_actual = float(stats.get("last", 0))
     volumen_24h = float(stats.get("volValue", 0))  # volumen en USDT
 
+    # Si volumen_24h está en cero, intenta obtener desde get_ticker como respaldo
+    if volumen_24h == 0:
+        ticker = market_client.get_ticker(symbol=par)
+        volumen_24h = float(ticker.get("volValue", 0))
+
     logging.info(f"🧠 Analizando {par} | Precio: {precio_actual} | Volumen 24h: {volumen_24h}")
 
     if volumen_24h == 0 or precio_actual == 0:
