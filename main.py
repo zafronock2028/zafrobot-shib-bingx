@@ -110,15 +110,11 @@ async def loop_operaciones():
     volumen_usdt = float(datos.get("volValue", 0))  # Volumen en USDT
     volumen_token = float(datos.get("vol", 0))      # Volumen en cantidad del token
 
-precio_actual = float(datos.get("last", 0))
-volumen_usdt = float(datos.get("volValue", 0))  # Volumen en USDT
-volumen_token = float(datos.get("vol", 0))      # Volumen en cantidad del token
+    logging.info(f"🧠 Analizando {par} | Precio: {precio_actual} | Volumen 24h: {volumen_usdt}")
 
-logging.info(f"🧠 Analizando {par} | Precio: {precio_actual} | Volumen 24h: {volumen_usdt}")
-
-if volumen_usdt == 0 or precio_actual == 0:
-    logging.warning(f"⚠️ Datos no válidos para {par}")
-    continue
+    if volumen_usdt == 0 or precio_actual == 0:
+        logging.warning(f"⚠️ Datos no válidos para {par}")
+        continue
 
 porcentaje = 0.8 if volumen_usdt > 100000 else 0.5
                     monto_uso = saldo * porcentaje
