@@ -83,9 +83,10 @@ async def comandos(message: types.Message):
                     f"Ganancia: {op['ganancia']:.6f} USDT ({estado})\n\n"
                 )
             await message.answer(mensaje)
-                else:
+                        else:
             await message.answer("⚠️ No hay operaciones activas actualmente.")
 
+# Función para obtener el saldo disponible en USDT
 def obtener_saldo_disponible():
     try:
         cuentas = user_client.get_account_list()
