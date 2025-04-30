@@ -11,7 +11,7 @@ API_PASS = "TU_API_PASS"
 CHAT_ID = "TU_CHAT_ID"
 TOKEN = "TU_BOT_TOKEN"
 
-bot = Bot(token=TOKEN)
+bot = Bot(token=TOKEN, parse_mode="Markdown")
 dp = Dispatcher()
 
 market_client = Market()
@@ -31,6 +31,7 @@ ganancia_objetivo = 0.008
 historial_operaciones = {"ganadas": 1, "perdidas": 1}
 min_orden_usdt = 3.0
 max_orden_usdt = 6.0
+
 keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🚀 Encender Bot")],
@@ -83,7 +84,9 @@ async def comandos(message: types.Message):
                 )
             await message.answer(mensaje)
         else:
-            await message.answer("⚠️ No hay operaciones activas actualmente.")async def obtener_saldo_disponible():
+            await message.answer("⚠️ No hay operaciones activas actualmente.")
+
+async def obtener_saldo_disponible():
     try:
         cuentas = user_client.get_account_list()
         saldo = next((float(x["available"]) for x in cuentas if x["currency"] == "USDT"), 0.0)
@@ -131,7 +134,7 @@ def analizar_par(par):
             await asyncio.sleep(10)
             continue
 
-        win_rate = historial_operaciones["ganadas"] / (historial_operaciones["ganadas"] + historial_operaciones["perdidas"])
+        win_rate = historial_operaciones["ganadas"] / max((historial_operaciones["ganadas"] + historial_operaciones["perdidas"]), 1)
         porcentaje_kelly = calcular_kelly(win_rate)
 
         for par in pares:
@@ -166,7 +169,9 @@ def analizar_par(par):
                 except Exception as e:
                     logging.error(f"Error ejecutando orden en {par}: {e}")
 
-        await asyncio.sleep(5)async def monitorear_salida(operacion):
+        await asyncio.sleep(5)
+
+async def monitorear_salida(operacion):
     global operaciones_activas, historial_operaciones
 
     entrada = operacion["entrada"]
