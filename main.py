@@ -37,6 +37,7 @@ ganancia_objetivo = 0.008
 historial_operaciones = {"ganadas": 1, "perdidas": 1}
 min_orden_usdt = 5.0
 
+# Teclado principal sin botón duplicado de saldo
 keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🚀 Encender Bot")],
@@ -48,10 +49,13 @@ keyboard = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
-# Registra los handlers en Aiogram 3
-dp.message.register(start, Command("start"))
-dp.message.register(comandos)
+# Comando /start
+@dp.message(Command("start"))
+async def start(message: types.Message):
+    await message.answer("✅ ¡Bienvenido al Zafrobot Scalper V1!", reply_markup=keyboard)
 
+# Manejo de comandos
+@dp.message()
 async def comandos(message: types.Message):
     global bot_encendido
 
