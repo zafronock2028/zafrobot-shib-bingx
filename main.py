@@ -25,11 +25,13 @@ user_client = User(API_KEY, SECRET_KEY, API_PASSPHRASE)
 market_client = Market()
 trade_client = Trade(key=API_KEY, secret=SECRET_KEY, passphrase=API_PASSPHRASE)
 
+# Variables Globales
 bot_encendido = False
 operacion_activa = None
 pares = ["SHIB-USDT", "PEPE-USDT", "FLOKI-USDT", "DOGE-USDT"]
 trailing_stop_pct = -0.08
 
+# Teclado para Telegram
 keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🚀 Encender Bot")],
@@ -41,6 +43,7 @@ keyboard = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
+# Comandos de Telegram
 @dp.message(Command("start"))
 async def start(message: types.Message):
     await message.answer("✅ ¡Bienvenido al Zafrobot Dinámico Pro Scalping!", reply_markup=keyboard)
@@ -73,17 +76,15 @@ async def comandos_principales(message: types.Message):
         if operacion_activa:
             estado = "GANANCIA ✅" if operacion_activa["ganancia"] >= 0 else "PÉRDIDA ❌"
             await message.answer(
-                f"📈 Operación activa en {operacion_activa['par']}
-"
-                f"Entrada: {operacion_activa['entrada']:.6f} USDT
-"
-                f"Actual: {operacion_activa['actual']:.6f} USDT
-"
+                f"📈 Operación activa en {operacion_activa['par']}\n"
+                f"Entrada: {operacion_activa['entrada']:.6f} USDT\n"
+                f"Actual: {operacion_activa['actual']:.6f} USDT\n"
                 f"Ganancia: {operacion_activa['ganancia']:.6f} USDT ({estado})"
             )
         else:
             await message.answer("⚠️ No hay operaciones activas actualmente.")
 
+# Funciones de Trading
 def obtener_saldo_disponible():
     try:
         cuentas = user_client.get_account_list()
@@ -145,13 +146,6 @@ async def loop_operaciones():
                             "actual": precio_actual,
                             "ganancia": 0.0
                         }
-                        await bot.send_message(
-                            CHAT_ID,
-                            f"✅ COMPRA realizada
-Par: {par}
-Cantidad: {cantidad}
-Precio: {precio_actual:.6f} USDT"
-                        )
                         await monitorear_salida()
                         break
 
@@ -190,13 +184,6 @@ async def monitorear_salida():
                     side="sell",
                     size=str(operacion_activa["cantidad"])
                 )
-                await bot.send_message(
-                    CHAT_ID,
-                    f"✅ VENTA realizada
-Par: {operacion_activa['par']}
-Precio: {precio_actual:.6f} USDT
-Ganancia: {operacion_activa['ganancia']:.6f} USDT"
-                )
                 operacion_activa = None
                 break
 
@@ -205,6 +192,7 @@ Ganancia: {operacion_activa['ganancia']:.6f} USDT"
 
         await asyncio.sleep(2)
 
+# Ejecutar bot con reconexión automática
 async def main():
     while True:
         try:
