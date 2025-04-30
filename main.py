@@ -139,6 +139,11 @@ async def loop_operaciones():
                     if velas_verdes >= 3:
                         puntaje += 1
 
+                    logging.info(
+                        f"🔍 Analizando {par} | Precio actual: {precio_actual} | Promedio 5 velas: {promedio_precio:.8f} | "
+                        f"Volumen 24h: {volumen_24h} | Volumen reciente: {volumen_reciente} | Puntaje: {puntaje}"
+                    )
+
                     if puntaje > mejor_puntaje:
                         mejor_par = par
                         mejor_puntaje = puntaje
@@ -166,6 +171,8 @@ async def loop_operaciones():
                         "actual": precio_actual,
                         "ganancia": 0.0
                     }
+
+                    logging.info(f"✅ COMPRA ejecutada en {mejor_par} | Entrada: {precio_actual} | Cantidad: {cantidad}")
 
                     await bot.send_message(
                         CHAT_ID,
