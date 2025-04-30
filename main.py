@@ -96,7 +96,10 @@ def obtener_saldo_disponible():
 
 def calcular_kelly(win_rate, avg_win=1, avg_loss=1):
     kelly = (win_rate * avg_win - (1 - win_rate) * avg_loss) / avg_win
-    return max(min(kelly, 1), 0.05)async def loop_operaciones():
+    return max(min(kelly, 1), 0.05)
+
+# Asegúrate de que esto quede en la siguiente línea
+async def loop_operaciones():
     global bot_encendido, operaciones_activas
 
     while bot_encendido:
