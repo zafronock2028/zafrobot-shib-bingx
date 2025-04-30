@@ -30,9 +30,7 @@ trailing_stop_pct = -0.08
 ganancia_objetivo = 0.008
 historial_operaciones = {"ganadas": 1, "perdidas": 1}
 min_orden_usdt = 3.0
-max_orden_usdt = 6.0
-
-keyboard = ReplyKeyboardMarkup(
+max_orden_usdt = 6.0keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🚀 Encender Bot")],
         [KeyboardButton(text="⛔ Apagar Bot")],
@@ -41,18 +39,18 @@ keyboard = ReplyKeyboardMarkup(
         [KeyboardButton(text="📈 Estado de Orden Activa")]
     ],
     resize_keyboard=True
-)# Comando /start
+)
+
 @dp.message(Command("start"))
 async def start(message: types.Message):
     await message.answer("✅ ¡Bienvenido al Zafrobot Scalper V1!", reply_markup=keyboard)
 
-# Comandos de botones
 @dp.message()
 async def comandos(message: types.Message):
     global bot_encendido
 
     if message.text == "💰 Saldo":
-        saldo = obtener_saldo_disponible()
+        saldo = await obtener_saldo_disponible()
         await message.answer(f"💰 Tu saldo disponible es: {saldo:.2f} USDT")
 
     elif message.text == "🚀 Encender Bot":
@@ -83,12 +81,8 @@ async def comandos(message: types.Message):
                     f"Ganancia: {op['ganancia']:.6f} USDT ({estado})\n\n"
                 )
             await message.answer(mensaje)
-                                else:
-            await message.answer("⚠️ No hay operaciones activas actualmente.")
-
-
-# Función para obtener el saldo disponible en USDT
-def obtener_saldo_disponible():
+        else:
+            await message.answer("⚠️ No hay operaciones activas actualmente.")async def obtener_saldo_disponible():
     try:
         cuentas = user_client.get_account_list()
         saldo = next((float(x["available"]) for x in cuentas if x["currency"] == "USDT"), 0.0)
@@ -131,7 +125,7 @@ def analizar_par(par):
             await asyncio.sleep(4)
             continue
 
-        saldo = obtener_saldo_disponible()
+        saldo = await obtener_saldo_disponible()
         if saldo < min_orden_usdt:
             await asyncio.sleep(10)
             continue
@@ -171,9 +165,7 @@ def analizar_par(par):
                 except Exception as e:
                     logging.error(f"Error ejecutando orden en {par}: {e}")
 
-        await asyncio.sleep(5)
-
-async def monitorear_salida(operacion):
+        await asyncio.sleep(5)async def monitorear_salida(operacion):
     global operaciones_activas, historial_operaciones
 
     entrada = operacion["entrada"]
@@ -210,7 +202,10 @@ async def monitorear_salida(operacion):
                 break
         except Exception as e:
             logging.error(f"Error monitoreando salida de {par}: {e}")
-        await asyncio.sleep(4)async def main():
+        await asyncio.sleep(4)
+
+# Iniciar el bot
+async def main():
     logging.basicConfig(level=logging.INFO)
     await dp.start_polling(bot)
 
