@@ -8,7 +8,7 @@ from aiogram.filters import Command
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from dotenv import load_dotenv
 
-# Cargar variables de entorno
+# ─── Cargar variables de entorno ───
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 
@@ -25,11 +25,13 @@ user_client = User(API_KEY, SECRET_KEY, API_PASSPHRASE)
 market_client = Market()
 trade_client = Trade(key=API_KEY, secret=SECRET_KEY, passphrase=API_PASSPHRASE)
 
+# ─── Variables Globales ───
 bot_encendido = False
 operacion_activa = None
 pares = ["SHIB-USDT", "PEPE-USDT", "FLOKI-USDT", "DOGE-USDT"]
 trailing_stop_pct = -0.08
 
+# ─── Teclado para Telegram ───
 keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🚀 Encender Bot")],
@@ -41,6 +43,7 @@ keyboard = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
+# ─── Comandos de Telegram ───
 @dp.message(Command("start"))
 async def start(message: types.Message):
     await message.answer("✅ ¡Bienvenido al Zafrobot Dinámico Pro Scalping!", reply_markup=keyboard)
@@ -73,14 +76,18 @@ async def comandos_principales(message: types.Message):
         if operacion_activa:
             estado = "GANANCIA ✅" if operacion_activa["ganancia"] >= 0 else "PÉRDIDA ❌"
             await message.answer(
-                f"📈 Operación activa en {operacion_activa['par']}\n"
-                f"Entrada: {operacion_activa['entrada']:.6f} USDT\n"
-                f"Actual: {operacion_activa['actual']:.6f} USDT\n"
+                f"📈 Operación activa en {operacion_activa['par']}
+"
+                f"Entrada: {operacion_activa['entrada']:.6f} USDT
+"
+                f"Actual: {operacion_activa['actual']:.6f} USDT
+"
                 f"Ganancia: {operacion_activa['ganancia']:.6f} USDT ({estado})"
             )
         else:
             await message.answer("⚠️ No hay operaciones activas actualmente.")
 
+# ─── Funciones de Trading ───
 def obtener_saldo_disponible():
     try:
         cuentas = user_client.get_account_list()
@@ -106,24 +113,26 @@ async def loop_operaciones():
                     break
 
                 try:
-                    ticker = market_client.get_ticker(par)
-                    volumen_24h = float(ticker.get('volValue') or ticker.get('vol') or 0)
-                    precio_actual = float(ticker.get('price') or 0)
+                    stats = market_client.get_24h_stats(par)
+                    precio_actual = float(stats['last'])
+                    volumen_24h = float(stats['volValue'])
 
                     if volumen_24h == 0 or precio_actual == 0:
                         logging.warning(f"⚠️ Datos no válidos para {par}")
                         continue
 
+                    logging.info(f"Analizando {par} | Volumen 24h: {volumen_24h}")
                     porcentaje_inversion = 0.8 if volumen_24h > 100000 else 0.5
                     monto_usar = saldo * porcentaje_inversion
                     monto_maximo_volumen = volumen_24h * 0.04
                     monto_final = min(monto_usar, monto_maximo_volumen)
+                    logging.info(f"➡️ Monto a usar en {par}: {monto_final}")
 
                     if monto_final < 5:
                         continue
 
-                    velas = market_client.get_kline(symbol=par, kline_type="1min")
-                    precios = [float(v[2]) for v in velas[-5:]]
+                    velas = market_client.get_kline(par, "1min", 5)
+                    precios = [float(v[2]) for v in velas]
                     if not precios:
                         logging.warning(f"⚠️ Velas vacías para {par}")
                         continue
@@ -131,7 +140,7 @@ async def loop_operaciones():
                     promedio_precio = sum(precios) / len(precios)
 
                     if precio_actual < promedio_precio:
-                        cantidad = round(monto_final / precio_actual, 6)
+                        cantidad = round(monto_final / precio_actual, 2)
                         trade_client.create_market_order(
                             symbol=par,
                             side="buy",
@@ -159,14 +168,15 @@ async def loop_operaciones():
 
         await asyncio.sleep(2)
 
+# ─── Monitoreo de Salida con Trailing Stop ───
 async def monitorear_salida():
     global operacion_activa
     precio_max = operacion_activa["entrada"]
 
     while True:
         try:
-            ticker = market_client.get_ticker(operacion_activa["par"])
-            precio_actual = float(ticker["price"])
+            stats = market_client.get_24h_stats(operacion_activa["par"])
+            precio_actual = float(stats['last'])
 
             if precio_actual > precio_max:
                 precio_max = precio_actual
@@ -193,13 +203,13 @@ async def monitorear_salida():
 
         await asyncio.sleep(2)
 
-# ─── Iniciar Bot con reconexión automática ───
+# ─── Iniciar Bot ───
 async def main():
     while True:
         try:
             await dp.start_polling(bot)
         except Exception as e:
-            logging.error(f"Error al reconectar con Telegram: {e}")
+            logging.error(f"Polling reiniciado por error: {e}")
             await asyncio.sleep(5)
 
 if __name__ == "__main__":
