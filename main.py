@@ -84,9 +84,7 @@ async def comandos(message: types.Message):
                 )
             await message.answer(mensaje)
         else:
-            await message.answer("⚠️ No hay operaciones activas actualmente.")
-
-async def obtener_saldo_disponible():
+            await message.answer("⚠️ No hay operaciones activas actualmente.")async def obtener_saldo_disponible():
     try:
         cuentas = user_client.get_account_list()
         saldo = next((float(x["available"]) for x in cuentas if x["currency"] == "USDT"), 0.0)
@@ -121,7 +119,9 @@ def analizar_par(par):
         }
     except Exception as e:
         logging.error(f"Error analizando par {par}: {e}")
-        return {"puntaje": 0, "precio": 0.0, "volumen": 0.0}async def loop_operaciones():
+        return {"puntaje": 0, "precio": 0.0, "volumen": 0.0}
+
+async def loop_operaciones():
     global bot_encendido, operaciones_activas
 
     while bot_encendido:
@@ -150,7 +150,7 @@ def analizar_par(par):
                 cantidad = round(monto_inversion / analisis["precio"], 2)
 
                 try:
-                    orden = trade_client.create_market_order(symbol=par, side="buy", size=str(cantidad))
+                    trade_client.create_market_order(symbol=par, side="buy", size=str(cantidad))
                     operacion = {
                         "par": par,
                         "entrada": analisis["precio"],
