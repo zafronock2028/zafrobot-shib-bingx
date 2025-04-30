@@ -28,16 +28,16 @@ bot_encendido = False
 operacion_activa = None
 pares = ["SHIB-USDT", "PEPE-USDT", "FLOKI-USDT", "DOGE-USDT"]
 trailing_stop_pct = -0.08
-ganancia_objetivo = 0.015
+ganancia_objetivo = 0.012
 historial_operaciones = {"ganadas": 1, "perdidas": 1}
 
 keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🚀 Encender Bot")],
         [KeyboardButton(text="🛑 Apagar Bot")],
-        [KeyboardButton(text="💰 Saldo")],
+        [KeyboardButton(text="🔄 Actualizar Saldo")],
         [KeyboardButton(text="📊 Estado Bot")],
-        [KeyboardButton(text="📈 Estado de Orden Actual")]
+        [KeyboardButton(text="📈 Ver Operación Activa")]
     ],
     resize_keyboard=True
 )
@@ -50,9 +50,9 @@ async def start(message: types.Message):
 async def comandos(message: types.Message):
     global bot_encendido, operacion_activa
 
-    if message.text == "💰 Saldo":
+    if message.text == "🔄 Actualizar Saldo":
         saldo = obtener_saldo_disponible()
-        await message.answer(f"💰 Tu saldo disponible es: {saldo:.2f} USDT")
+        await message.answer(f"💰 *Saldo disponible:* `{saldo:.2f} USDT`")
 
     elif message.text == "🚀 Encender Bot":
         if not bot_encendido:
@@ -68,16 +68,23 @@ async def comandos(message: types.Message):
 
     elif message.text == "📊 Estado Bot":
         estado = "✅ ENCENDIDO" if bot_encendido else "🛑 APAGADO"
-        await message.answer(f"📊 Estado actual del bot: {estado}")
+        await message.answer(f"📊 *Estado del bot:* {estado}")
 
-    elif message.text == "📈 Estado de Orden Actual":
+    elif message.text == "📈 Ver Operación Activa":
         if operacion_activa:
-            estado = "GANANCIA ✅" if operacion_activa["ganancia"] >= 0 else "PÉRDIDA ❌"
+            entrada = operacion_activa["entrada"]
+            actual = operacion_activa["actual"]
+            ganancia = operacion_activa["ganancia"]
+            porcentaje = ((actual - entrada) / entrada) * 100
+            estado = "✅ *GANANCIA*" if ganancia >= 0 else "❌ *PÉRDIDA*"
             await message.answer(
-                f"📈 Operación activa en {operacion_activa['par']}\n"
-                f"Entrada: {operacion_activa['entrada']:.6f} USDT\n"
-                f"Actual: {operacion_activa['actual']:.6f} USDT\n"
-                f"Ganancia: {operacion_activa['ganancia']:.6f} USDT ({estado})"
+                f"📈 *Operación Activa*\n\n"
+                f"Par: `{operacion_activa['par']}`\n"
+                f"Entrada: `{entrada:.6f}`\n"
+                f"Actual: `{actual:.6f}`\n"
+                f"Ganancia: `{ganancia:.4f} USDT`\n"
+                f"Variación: `{porcentaje:.2f}%`\n\n"
+                f"{estado}"
             )
         else:
             await message.answer("⚠️ No hay operaciones activas actualmente.")
@@ -108,8 +115,7 @@ async def loop_operaciones():
             win_rate = historial_operaciones["ganadas"] / (historial_operaciones["ganadas"] + historial_operaciones["perdidas"])
             porcentaje_kelly = calcular_kelly(win_rate)
 
-            mejor_par = None
-            mejor_puntaje = 0
+            pares_validos = []
 
             for par in pares:
                 try:
@@ -144,14 +150,14 @@ async def loop_operaciones():
                         f"Volumen 24h: {volumen_24h} | Volumen reciente: {volumen_reciente} | Puntaje: {puntaje}"
                     )
 
-                    if puntaje > mejor_puntaje:
-                        mejor_par = par
-                        mejor_puntaje = puntaje
+                    if puntaje >= 2:
+                        pares_validos.append((par, puntaje))
 
                 except Exception:
                     continue
 
-            if mejor_par and not operacion_activa:
+            if pares_validos and not operacion_activa:
+                mejor_par = pares_validos[0][0]
                 stats = market_client.get_24h_stats(mejor_par)
                 precio_actual = float(stats.get("last", 0))
                 volumen_24h = float(stats.get("volValue", 0))
