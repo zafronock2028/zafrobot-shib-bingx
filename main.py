@@ -7,7 +7,6 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.filters import Command
 from kucoin.client import Market, Trade, User
 
-# Configuración
 API_KEY = os.getenv("API_KEY")
 SECRET_KEY = os.getenv("SECRET_KEY")
 API_PASS = os.getenv("API_PASSPHRASE")
@@ -20,22 +19,23 @@ market_client = Market()
 trade_client = Trade(key=API_KEY, secret=SECRET_KEY, passphrase=API_PASS)
 user_client = User(API_KEY, SECRET_KEY, API_PASS)
 
-# Variables globales
+# Parámetros
 bot_encendido = False
 operaciones_activas = []
 historial_operaciones = []
 ultimos_pares_operados = {}
+incrementos_cache = {}
 tiempo_espera_reentrada = 600  # 10 minutos
 max_operaciones = 3
+ganancia_objetivo = 0.015
+trailing_stop_base = -0.08
+min_orden_usdt = 3.0
+max_orden_usdt = 6.0
 pares = [
     "SHIB-USDT", "PEPE-USDT", "FLOKI-USDT", "DOGE-USDT", "TRUMP-USDT",
     "TURBO-USDT", "BONK-USDT", "KAS-USDT", "WIF-USDT", "SUI-USDT",
     "HYPE-USDT", "HYPER-USDT", "OM-USDT", "ENA-USDT"
 ]
-ganancia_objetivo = 0.015
-trailing_stop_base = -0.08
-min_orden_usdt = 3.0
-max_orden_usdt = 6.0
 
 keyboard = ReplyKeyboardMarkup(
     keyboard=[
@@ -56,11 +56,9 @@ async def start(message: types.Message):
 @dp.message()
 async def comandos(message: types.Message):
     global bot_encendido
-
     if message.text == "💰 Saldo":
         saldo = await obtener_saldo_disponible()
         await message.answer(f"💰 Tu saldo disponible es: {saldo:.2f} USDT")
-
     elif message.text == "🚀 Encender Bot":
         if not bot_encendido:
             bot_encendido = True
@@ -68,15 +66,12 @@ async def comandos(message: types.Message):
             asyncio.create_task(loop_operaciones())
         else:
             await message.answer("⚠️ El bot ya está encendido.")
-
     elif message.text == "⛔ Apagar Bot":
         bot_encendido = False
         await message.answer("⛔ Bot apagado manualmente.")
-
     elif message.text == "📊 Estado Bot":
         estado = "✅ ENCENDIDO" if bot_encendido else "⛔ APAGADO"
         await message.answer(f"📊 Estado actual del bot: {estado}")
-
     elif message.text == "📈 Estado de Orden Activa":
         if operaciones_activas:
             mensaje = ""
@@ -91,7 +86,6 @@ async def comandos(message: types.Message):
             await message.answer(mensaje)
         else:
             await message.answer("⚠️ No hay operaciones activas actualmente.")
-
     elif message.text == "🧾 Historial de Ganancias":
         if historial_operaciones:
             mensaje = "🧾 *Últimas ganancias:*\n\n"
@@ -128,12 +122,21 @@ def analizar_par(par):
             puntaje += 1
         if volumen_24h > 500000:
             puntaje += 1
-
         logging.info(f"[ANÁLISIS] {par} | Puntaje: {puntaje} | Precio: {actual:.8f} | Promedio: {promedio:.8f} | Volumen: {volumen_24h:.2f} | Spread: {spread:.5f}")
         return {"puntaje": puntaje, "precio": actual, "volumen": volumen_24h}
     except Exception as e:
         logging.error(f"[Error] Analizando par {par}: {e}")
         return {"puntaje": 0, "precio": 0.0, "volumen": 0.0}
+
+def ajustar_a_incremento(par, cantidad):
+    if par not in incrementos_cache:
+        info = next((s for s in market_client.get_symbol_list() if s["symbol"] == par), None)
+        if info:
+            incrementos_cache[par] = float(info["baseIncrement"])
+        else:
+            incrementos_cache[par] = 0.000001
+    incremento = incrementos_cache[par]
+    return round((cantidad // incremento) * incremento, 8)
 
 async def loop_operaciones():
     global bot_encendido, operaciones_activas
@@ -150,20 +153,18 @@ async def loop_operaciones():
         for par in pares:
             if len(operaciones_activas) >= max_operaciones:
                 break
-
-            # Bloquea reentrada inmediata
             if par in ultimos_pares_operados:
-                tiempo_salida = ultimos_pares_operados[par]
-                if (datetime.now() - tiempo_salida).total_seconds() < tiempo_espera_reentrada:
+                if (datetime.now() - ultimos_pares_operados[par]).total_seconds() < tiempo_espera_reentrada:
                     continue
-
             analisis = analizar_par(par)
             if analisis["puntaje"] >= 2:
-                monto_inversion = max(min(saldo * 0.1, max_orden_usdt), min_orden_usdt)
-                if monto_inversion > saldo:
+                monto = max(min(saldo * 0.1, max_orden_usdt), min_orden_usdt)
+                if monto > saldo:
                     continue
-
-                cantidad = round(monto_inversion / analisis["precio"], 2)
+                cantidad = ajustar_a_incremento(par, monto / analisis["precio"])
+                if cantidad <= 0:
+                    logging.warning(f"[OMITIDO] {par} - cantidad ajustada inválida.")
+                    continue
                 try:
                     trade_client.create_market_order(symbol=par, side="buy", size=str(cantidad))
                     operacion = {
@@ -180,8 +181,8 @@ async def loop_operaciones():
                     )
                     asyncio.create_task(monitorear_salida(operacion))
                 except Exception as e:
-                    if "orderSize" in str(e).lower():
-                        logging.warning(f"[OMITIDO] {par} - tamaño mínimo no alcanzado.")
+                    if "order size increment" in str(e).lower():
+                        logging.warning(f"[OMITIDO] {par} - Error de incremento: {e}")
                     else:
                         logging.error(f"[Error] Ejecutando orden en {par}: {e}")
         await asyncio.sleep(5)
@@ -192,7 +193,6 @@ async def monitorear_salida(operacion):
     cantidad = operacion["cantidad"]
     par = operacion["par"]
     max_precio = entrada
-
     while True:
         try:
             actual = float(market_client.get_ticker(par)["price"])
@@ -202,7 +202,6 @@ async def monitorear_salida(operacion):
             ganancia = (actual - entrada) * cantidad
             operacion["actual"] = actual
             operacion["ganancia"] = ganancia
-
             if variacion >= ganancia_objetivo or ((actual - max_precio) / max_precio) <= trailing_stop_pct:
                 trade_client.create_market_order(symbol=par, side="sell", size=str(cantidad))
                 operaciones_activas.remove(operacion)
@@ -231,15 +230,14 @@ async def resumen_diario_y_reset():
         ahora = datetime.now()
         mañana = ahora + timedelta(days=1)
         proximo_reset = datetime(mañana.year, mañana.month, mañana.day, 0, 0)
-        espera = (proximo_reset - ahora).total_seconds()
-        await asyncio.sleep(espera)
+        await asyncio.sleep((proximo_reset - ahora).total_seconds())
 
         if operaciones_activas:
             for op in list(operaciones_activas):
                 try:
                     trade_client.create_market_order(symbol=op['par'], side="sell", size=str(op['cantidad']))
                     operaciones_activas.remove(op)
-                    ultimos_pares_operados[op['par']] = datetime.now()
+                    ultimos_pares_operados[op["par"]] = datetime.now()
                     resultado = "✅ GANADA" if op["ganancia"] >= 0 else "❌ PERDIDA"
                     saldo_actual = await obtener_saldo_disponible()
                     historial_operaciones.append({
