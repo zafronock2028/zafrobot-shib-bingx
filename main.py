@@ -35,12 +35,13 @@ pares = [
 trailing_stop_pct = -0.08
 ganancia_objetivo = 0.008
 historial_operaciones = {"ganadas": 1, "perdidas": 1}
+min_orden_usdt = 5.0
 
 keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🚀 Encender Bot")],
         [KeyboardButton(text="🛑 Apagar Bot")],
-        [KeyboardButton(text="💰 Saldo"), KeyboardButton(text="🔄 Refresh Saldo")],
+        [KeyboardButton(text="💰 Saldo")],
         [KeyboardButton(text="📊 Estado Bot")],
         [KeyboardButton(text="📈 Estado de Orden Actual")]
     ],
@@ -49,15 +50,13 @@ keyboard = ReplyKeyboardMarkup(
 
 @dp.message(Command("start"))
 async def start(message: types.Message):
-    await message.answer("✅ ¡Bienvenido al Zafrobot Scalper V1!", reply_markup=keyboard)
-
-@dp.message()
+    await message.answer("✅ ¡Bienvenido al Zafrobot Scalper V1!", reply_markup=keyboard)@dp.message()
 async def comandos(message: types.Message):
     global bot_encendido
 
-    if message.text in ["💰 Saldo", "🔄 Refresh Saldo"]:
+    if message.text == "💰 Saldo":
         saldo = obtener_saldo_disponible()
-        await message.answer(f"💰 *Saldo actual:* `{saldo:.2f} USDT`")
+        await message.answer(f"💰 Tu saldo disponible es: {saldo:.2f} USDT")
 
     elif message.text == "🚀 Encender Bot":
         if not bot_encendido:
@@ -81,10 +80,10 @@ async def comandos(message: types.Message):
             for op in operaciones_activas:
                 estado = "GANANCIA ✅" if op["ganancia"] >= 0 else "PÉRDIDA ❌"
                 mensaje += (
-                    f"📈 *Par:* `{op['par']}`\n"
-                    f"Entrada: `{op['entrada']:.6f}` USDT\n"
-                    f"Actual: `{op['actual']:.6f}` USDT\n"
-                    f"Ganancia: `{op['ganancia']:.6f}` USDT ({estado})\n\n"
+                    f"📈 Par: {op['par']}\n"
+                    f"Entrada: {op['entrada']:.6f} USDT\n"
+                    f"Actual: {op['actual']:.6f} USDT\n"
+                    f"Ganancia: {op['ganancia']:.6f} USDT ({estado})\n\n"
                 )
             await message.answer(mensaje)
         else:
@@ -100,12 +99,8 @@ def obtener_saldo_disponible():
         return 0.0
 
 def calcular_kelly(win_rate, avg_win=1, avg_loss=1):
-    try:
-        kelly = (win_rate * avg_win - (1 - win_rate)) / avg_loss
-        return max(min(kelly, 1), 0.05)
-    except Exception as e:
-        logging.error(f"Error en cálculo de Kelly: {e}")
-        return 0.05
+    kelly = (win_rate * avg_win - (1 - win_rate)) / avg_loss
+    return max(min(kelly, 1), 0.05)
 
 async def loop_operaciones():
     global bot_encendido, operaciones_activas
@@ -116,12 +111,11 @@ async def loop_operaciones():
             continue
 
         saldo = obtener_saldo_disponible()
-        if saldo < 5:
+        if saldo < min_orden_usdt:
             await asyncio.sleep(5)
             continue
 
-        total_ops = historial_operaciones["ganadas"] + historial_operaciones["perdidas"]
-        win_rate = historial_operaciones["ganadas"] / total_ops if total_ops > 0 else 1
+        win_rate = historial_operaciones["ganadas"] / (historial_operaciones["ganadas"] + historial_operaciones["perdidas"])
         porcentaje_kelly = calcular_kelly(win_rate)
 
         for par in pares:
@@ -131,6 +125,10 @@ async def loop_operaciones():
             info = analizar_par(par)
             if info["puntaje"] >= 2:
                 monto_inversion = min(saldo * porcentaje_kelly, saldo / (max_operaciones - len(operaciones_activas)))
+                if monto_inversion < min_orden_usdt:
+                    logging.info(f"⛔ Monto insuficiente para operar {par}: {monto_inversion:.2f} USDT")
+                    continue
+
                 cantidad = monto_inversion / info["precio"]
                 resultado = ejecutar_compra(par, cantidad)
 
@@ -144,11 +142,10 @@ async def loop_operaciones():
                     }
                     operaciones_activas.append(operacion)
                     logging.info(f"🟢 COMPRA: {par} | Entrada: {info['precio']} | Cantidad: {cantidad}")
-                    await bot.send_message(CHAT_ID, f"🟢 *COMPRA EJECUTADA*\nPar: `{par}`\nEntrada: `{info['precio']:.6f}` USDT")
-                    asyncio.create_task(monitorear_salida(operacion))
-        await asyncio.sleep(3)
+                    await bot.send_message(CHAT_ID, f"🟢 COMPRA EJECUTADA\nPar: {par}\nEntrada: {info['precio']:.6f} USDT")
 
-def analizar_par(par):
+                    asyncio.create_task(monitorear_salida(operacion))
+        await asyncio.sleep(3)def analizar_par(par):
     try:
         velas = market_client.get_kline(symbol=par, kline_type="1min", limit=5)
         precios = [float(x[2]) for x in velas]
@@ -201,10 +198,11 @@ async def monitorear_salida(operacion):
                 operaciones_activas.remove(operacion)
                 historial_operaciones["ganadas" if cambio_pct > 0 else "perdidas"] += 1
 
-                logging.info(f"🔴 VENTA: {par} | Salida: {actual} | Ganancia: {operacion['ganancia']:.4f}")
+                resultado = "✅ GANANCIA" if cambio_pct > 0 else "❌ PÉRDIDA"
+                logging.info(f"🔴 VENTA: {par} | Salida: {actual:.6f} | Ganancia: {operacion['ganancia']:.4f}")
                 await bot.send_message(
                     CHAT_ID,
-                    f"🔴 *VENTA EJECUTADA*\nPar: `{par}`\nSalida: `{actual:.6f}` USDT\nGanancia: `{operacion['ganancia']:.4f}` USDT"
+                    f"🔴 VENTA EJECUTADA\nPar: {par}\nSalida: {actual:.6f} USDT\nGanancia: {operacion['ganancia']:.4f} USDT\nResultado: {resultado}"
                 )
                 break
             await asyncio.sleep(5)
