@@ -57,7 +57,7 @@ async def comandos(message: types.Message):
     elif message.text == "🚀 Encender Bot":
         if not bot_encendido:
             bot_encendido = True
-            await message.answer("✅ *Bot encendido.*
+            await message.answer("*Bot encendido.*")
 Analizando oportunidades...")
             asyncio.create_task(loop_operaciones())
         else:
