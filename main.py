@@ -8,7 +8,7 @@ from aiogram.filters import Command
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from dotenv import load_dotenv
 
-# ─── Cargar variables de entorno ───
+# Cargar variables de entorno
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 
@@ -25,58 +25,58 @@ user_client = User(API_KEY, SECRET_KEY, API_PASSPHRASE)
 market_client = Market()
 trade_client = Trade(key=API_KEY, secret=SECRET_KEY, passphrase=API_PASSPHRASE)
 
-# ─── Variables Globales ───
+# Variables Globales
 bot_encendido = False
 operacion_activa = None
 pares = ["SHIB-USDT", "PEPE-USDT", "FLOKI-USDT", "DOGE-USDT"]
 trailing_stop_pct = -0.08
 
-# ─── Teclado para Telegram ───
+# Teclado para Telegram
 keyboard = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="🚀 Encender Bot")],
-        [KeyboardButton(text="🛑 Apagar Bot")],
-        [KeyboardButton(text="💰 Saldo")],
-        [KeyboardButton(text="📊 Estado Bot")],
-        [KeyboardButton(text="📈 Estado de Orden Actual")],
+        [KeyboardButton(text="ð Encender Bot")],
+        [KeyboardButton(text="ð Apagar Bot")],
+        [KeyboardButton(text="ð° Saldo")],
+        [KeyboardButton(text="ð Estado Bot")],
+        [KeyboardButton(text="ð Estado de Orden Actual")],
     ],
     resize_keyboard=True
 )
 
-# ─── Comandos de Telegram ───
+# Comandos de Telegram
 @dp.message(Command("start"))
 async def start(message: types.Message):
-    await message.answer("✅ ¡Bienvenido al Zafrobot Dinámico Pro Scalping!", reply_markup=keyboard)
+    await message.answer("â Â¡Bienvenido al Zafrobot DinÃ¡mico Pro Scalping!", reply_markup=keyboard)
 
 @dp.message()
 async def comandos_principales(message: types.Message):
     global bot_encendido, operacion_activa
 
-    if message.text == "💰 Saldo":
+    if message.text == "ð° Saldo":
         saldo = obtener_saldo_disponible()
-        await message.answer(f"💰 Tu saldo disponible es: {saldo:.2f} USDT")
+        await message.answer(f"ð° Tu saldo disponible es: {saldo:.2f} USDT")
 
-    elif message.text == "🚀 Encender Bot":
+    elif message.text == "ð Encender Bot":
         if not bot_encendido:
             bot_encendido = True
-            await message.answer("✅ Bot encendido. Analizando oportunidades...")
+            await message.answer("â Bot encendido. Analizando oportunidades...")
             asyncio.create_task(loop_operaciones())
         else:
-            await message.answer("⚠️ El bot ya está encendido.")
+            await message.answer("â ï¸ El bot ya estÃ¡ encendido.")
 
-    elif message.text == "🛑 Apagar Bot":
+    elif message.text == "ð Apagar Bot":
         bot_encendido = False
-        await message.answer("🛑 Bot apagado manualmente.")
+        await message.answer("ð Bot apagado manualmente.")
 
-    elif message.text == "📊 Estado Bot":
-        estado = "✅ ENCENDIDO" if bot_encendido else "🛑 APAGADO"
-        await message.answer(f"📊 Estado actual del bot: {estado}")
+    elif message.text == "ð Estado Bot":
+        estado = "â ENCENDIDO" if bot_encendido else "ð APAGADO"
+        await message.answer(f"ð Estado actual del bot: {estado}")
 
-    elif message.text == "📈 Estado de Orden Actual":
+    elif message.text == "ð Estado de Orden Actual":
         if operacion_activa:
-            estado = "GANANCIA ✅" if operacion_activa["ganancia"] >= 0 else "PÉRDIDA ❌"
+            estado = "GANANCIA â" if operacion_activa["ganancia"] >= 0 else "PÃRDIDA â"
             await message.answer(
-                f"📈 Operación activa en {operacion_activa['par']}
+                f"ð OperaciÃ³n activa en {operacion_activa['par']}
 "
                 f"Entrada: {operacion_activa['entrada']:.6f} USDT
 "
@@ -85,9 +85,9 @@ async def comandos_principales(message: types.Message):
                 f"Ganancia: {operacion_activa['ganancia']:.6f} USDT ({estado})"
             )
         else:
-            await message.answer("⚠️ No hay operaciones activas actualmente.")
+            await message.answer("â ï¸ No hay operaciones activas actualmente.")
 
-# ─── Funciones de Trading ───
+# Funciones de Trading
 def obtener_saldo_disponible():
     try:
         cuentas = user_client.get_account_list()
@@ -113,32 +113,28 @@ async def loop_operaciones():
                     break
 
                 try:
-                    stats = market_client.get_24h_stats(par)
-                    precio_actual = float(stats['last'])
-                    volumen_24h = float(stats['volValue'])
+                    ticker = market_client.get_ticker(par)
+                    precio_actual = float(ticker.get("price", 0))
+                    volumen_24h = float(ticker.get("volValue", 0))
 
                     if volumen_24h == 0 or precio_actual == 0:
-                        logging.warning(f"⚠️ Datos no válidos para {par}")
+                        logging.warning(f"â ï¸ Datos no vÃ¡lidos para {par}")
                         continue
 
-                    logging.info(f"Analizando {par} | Volumen 24h: {volumen_24h}")
                     porcentaje_inversion = 0.8 if volumen_24h > 100000 else 0.5
                     monto_usar = saldo * porcentaje_inversion
-                    monto_maximo_volumen = volumen_24h * 0.04
-                    monto_final = min(monto_usar, monto_maximo_volumen)
-                    logging.info(f"➡️ Monto a usar en {par}: {monto_final}")
+                    monto_max_volumen = volumen_24h * 0.04
+                    monto_final = min(monto_usar, monto_max_volumen)
 
                     if monto_final < 5:
                         continue
 
-                    velas = market_client.get_kline(par, "1min", 5)
+                    velas = market_client.get_kline(symbol=par, kline_type="1min", size=5)
                     precios = [float(v[2]) for v in velas]
                     if not precios:
-                        logging.warning(f"⚠️ Velas vacías para {par}")
                         continue
 
                     promedio_precio = sum(precios) / len(precios)
-
                     if precio_actual < promedio_precio:
                         cantidad = round(monto_final / precio_actual, 2)
                         trade_client.create_market_order(
@@ -146,7 +142,6 @@ async def loop_operaciones():
                             side="buy",
                             size=str(cantidad)
                         )
-                        logging.info(f"Comprado {cantidad} de {par} a {precio_actual}")
                         operacion_activa = {
                             "par": par,
                             "entrada": precio_actual,
@@ -168,16 +163,14 @@ async def loop_operaciones():
 
         await asyncio.sleep(2)
 
-# ─── Monitoreo de Salida con Trailing Stop ───
 async def monitorear_salida():
     global operacion_activa
     precio_max = operacion_activa["entrada"]
 
     while True:
         try:
-            stats = market_client.get_24h_stats(operacion_activa["par"])
-            precio_actual = float(stats['last'])
-
+            ticker = market_client.get_ticker(operacion_activa["par"])
+            precio_actual = float(ticker["price"])
             if precio_actual > precio_max:
                 precio_max = precio_actual
 
@@ -188,8 +181,7 @@ async def monitorear_salida():
             operacion_activa["actual"] = precio_actual
             operacion_activa["ganancia"] = ganancia_actual
 
-            if variacion >= 0.025 or retroceso <= trailing_stop_pct:
-                logging.info(f"✅ VENTA en {operacion_activa['par']} a {precio_actual} USDT")
+            if variacion >= 0.02 or retroceso <= trailing_stop_pct:
                 trade_client.create_market_order(
                     symbol=operacion_activa["par"],
                     side="sell",
@@ -203,13 +195,13 @@ async def monitorear_salida():
 
         await asyncio.sleep(2)
 
-# ─── Iniciar Bot ───
+# Ejecutar bot con reconexiÃ³n automÃ¡tica
 async def main():
     while True:
         try:
             await dp.start_polling(bot)
         except Exception as e:
-            logging.error(f"Polling reiniciado por error: {e}")
+            logging.error(f"Error en polling: {e}")
             await asyncio.sleep(5)
 
 if __name__ == "__main__":
