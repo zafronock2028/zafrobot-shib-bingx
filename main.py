@@ -1,4 +1,4 @@
-# --- ZAFROBOT SCALPER V1 ULTRA CONSERVADOR (con step_size por par y uso real del 75% del saldo) ---
+# --- ZAFROBOT SCALPER V1 ULTRA CONSERVADOR (con trailing stop agresivo y uso real del 75%) ---
 
 import os
 import logging
@@ -209,7 +209,13 @@ async def monitorear_salida(operacion):
             actual = float(market_client.get_ticker(par)["price"])
             max_precio = max(max_precio, actual)
             variacion = (actual - entrada) / entrada
-            trailing_stop = trailing_stop_base + min(variacion / 2, 0.03)
+
+            # Trailing stop más agresivo si llega a la ganancia objetivo
+            if variacion >= ganancia_objetivo:
+                trailing_stop = max(-0.02, trailing_stop_base + min(variacion / 1.5, 0.04))
+            else:
+                trailing_stop = trailing_stop_base + min(variacion / 2, 0.03)
+
             ganancia = (actual - entrada) * cantidad
             operacion.update({"actual": actual, "ganancia": ganancia})
 
