@@ -1,4 +1,4 @@
-# --- ZAFROBOT SCALPER V1 ULTRA CONSERVADOR (corregido con redondeo seguro de cantidad) ---
+# --- ZAFROBOT SCALPER V1 ULTRA CONSERVADOR (corregido con redondeo por step_size) ---
 
 import os
 import logging
@@ -38,6 +38,15 @@ pares = [
     "TURBO-USDT", "BONK-USDT", "KAS-USDT", "WIF-USDT", "SUI-USDT",
     "HYPE-USDT", "HYPER-USDT", "OM-USDT", "ENA-USDT"
 ]
+
+# Step size específico por par (puedes agregar más si es necesario)
+step_size_por_par = {
+    "SUI-USDT": 0.1,
+    "TRUMP-USDT": 0.01,
+    "OM-USDT": 0.01,
+    "ENA-USDT": 0.01,
+    # Por defecto 0.0001 si no se especifica
+}
 
 keyboard = ReplyKeyboardMarkup(
     keyboard=[
@@ -133,11 +142,11 @@ def calcular_porcentaje_saldo(saldo):
     else:
         return 0.30
 
-def corregir_cantidad(orden_usdt, precio_token, step=0.0001):
+def corregir_cantidad(orden_usdt, precio_token, par):
+    step = Decimal(str(step_size_por_par.get(par, 0.0001)))
     cantidad = Decimal(str(orden_usdt)) / Decimal(str(precio_token))
-    incremento = Decimal(str(step))
-    cantidad_corr = (cantidad // incremento) * incremento
-    return str(cantidad_corr.quantize(incremento, rounding=ROUND_DOWN))
+    cantidad_corr = (cantidad // step) * step
+    return str(cantidad_corr.quantize(step, rounding=ROUND_DOWN))
 
 async def ciclo_completo():
     global bot_encendido, operaciones_activas
@@ -173,7 +182,7 @@ async def ejecutar_compra(analisis):
     if monto > saldo:
         return
 
-    cantidad = corregir_cantidad(monto, analisis["precio"], step=0.0001)
+    cantidad = corregir_cantidad(monto, analisis["precio"], analisis["par"])
 
     try:
         trade_client.create_market_order(symbol=analisis["par"], side="buy", size=cantidad)
