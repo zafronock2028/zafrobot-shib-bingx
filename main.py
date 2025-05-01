@@ -1,4 +1,4 @@
-# --- ZAFROBOT SCALPER V1 ULTRA CONSERVADOR PRO (Auto-pars, 2 operaciones, trailing agresivo, logs visibles, control de ejecución) ---
+# --- ZAFROBOT SCALPER V1 ULTRA CONSERVADOR PRO ---
 
 import os
 import logging
