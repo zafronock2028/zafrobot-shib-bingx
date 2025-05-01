@@ -1,4 +1,4 @@
-# --- ZAFROBOT SCALPER V1 ULTRA CONSERVADOR (corregido con redondeo por step_size) ---
+# --- ZAFROBOT SCALPER V1 ULTRA CONSERVADOR (con step_size por par y uso real del 75% del saldo) ---
 
 import os
 import logging
@@ -31,7 +31,6 @@ max_operaciones = 1
 ganancia_objetivo = 0.015
 trailing_stop_base = -0.04
 min_orden_usdt = 2.5
-max_orden_usdt = 4.5
 
 pares = [
     "SHIB-USDT", "PEPE-USDT", "FLOKI-USDT", "DOGE-USDT", "TRUMP-USDT",
@@ -39,13 +38,11 @@ pares = [
     "HYPE-USDT", "HYPER-USDT", "OM-USDT", "ENA-USDT"
 ]
 
-# Step size específico por par (puedes agregar más si es necesario)
 step_size_por_par = {
     "SUI-USDT": 0.1,
     "TRUMP-USDT": 0.01,
     "OM-USDT": 0.01,
     "ENA-USDT": 0.01,
-    # Por defecto 0.0001 si no se especifica
 }
 
 keyboard = ReplyKeyboardMarkup(
@@ -133,11 +130,11 @@ def analizar_par(par):
         return {"par": par, "puntaje": 0, "precio": 0, "volumen": 0}
 
 def calcular_porcentaje_saldo(saldo):
-    if saldo < 50:
+    if saldo < 350:
         return 0.75
-    elif saldo < 100:
+    elif saldo < 500:
         return 0.60
-    elif saldo < 150:
+    elif saldo < 1000:
         return 0.45
     else:
         return 0.30
@@ -178,7 +175,7 @@ async def ejecutar_compra(analisis):
     global operaciones_activas
     saldo = await obtener_saldo_disponible()
     porcentaje = calcular_porcentaje_saldo(saldo)
-    monto = max(min(saldo * porcentaje, max_orden_usdt), min_orden_usdt)
+    monto = max(saldo * porcentaje, min_orden_usdt)
     if monto > saldo:
         return
 
