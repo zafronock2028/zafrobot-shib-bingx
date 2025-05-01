@@ -49,7 +49,9 @@ keyboard = ReplyKeyboardMarkup(
         [KeyboardButton(text="🧾 Historial de Ganancias")]
     ],
     resize_keyboard=True
-)@dp.message(Command("start"))
+)
+
+@dp.message(Command("start"))
 async def start(message: types.Message):
     await message.answer("✅ ¡Bienvenido al ZafroBot Scalper V1 Ultra Conservador!", reply_markup=keyboard)
 
@@ -128,17 +130,6 @@ def analizar_par(par):
         logging.error(f"[Error] Análisis en {par}: {e}")
         return {"par": par, "puntaje": 0, "precio": 0, "volumen": 0}
 
-async def actualizar_pares_rentables():
-    global pares
-    try:
-        tickers = market_client.get_all_tickers()["ticker"]
-        candidatos = [t["symbol"] for t in tickers if "-USDT" in t["symbol"]]
-        top = sorted(candidatos, key=lambda s: float(market_client.get_24h_stats(s)["volValue"]), reverse=True)
-        pares = top[:15]
-        logging.info(f"[Actualización diaria de pares] {pares}")
-    except Exception as e:
-        logging.error(f"[Error] Actualizando pares: {e}")
-
 def calcular_porcentaje_saldo(saldo):
     return 0.75 / max_operaciones
 
@@ -146,9 +137,12 @@ def corregir_cantidad(orden_usdt, precio_token, par):
     step = Decimal(str(step_size_por_par.get(par, 0.0001)))
     cantidad = Decimal(str(orden_usdt)) / Decimal(str(precio_token))
     cantidad_corr = (cantidad // step) * step
-    return str(cantidad_corr.quantize(step, rounding=ROUND_DOWN))async def ciclo_completo():
+    return str(cantidad_corr.quantize(step, rounding=ROUND_DOWN))
+
+# --- Aquí inicia el ciclo principal del bot ---
+async def ciclo_completo():
     global bot_encendido, operaciones_activas
-    await asyncio.sleep(10)  # Delay inicial tras encender
+    await asyncio.sleep(10)
 
     while bot_encendido:
         async with lock_operaciones:
@@ -192,6 +186,7 @@ def corregir_cantidad(orden_usdt, precio_token, par):
 
         await asyncio.sleep(5)
 
+# --- Ejecuta una compra ---
 async def ejecutar_compra(analisis):
     global operaciones_activas
     saldo = await obtener_saldo_disponible()
@@ -220,6 +215,7 @@ async def ejecutar_compra(analisis):
     except Exception as e:
         logging.error(f"[Error] Compra en {analisis['par']}: {e}")
 
+# --- Monitorea la venta y cierra la operación ---
 async def monitorear_salida(operacion):
     global operaciones_activas, historial_operaciones
     entrada, cantidad, par = operacion["entrada"], operacion["cantidad"], operacion["par"]
@@ -257,6 +253,7 @@ async def monitorear_salida(operacion):
             logging.error(f"[Error] Monitoreando {par}: {e}")
         await asyncio.sleep(4)
 
+# --- Resumen diario automático ---
 async def resumen_diario_y_reset():
     global operaciones_activas, historial_operaciones, bot_encendido
     while True:
@@ -299,6 +296,7 @@ async def resumen_diario_y_reset():
         await actualizar_pares_rentables()
         bot_encendido = True
 
+# --- Arranque del bot ---
 async def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
     asyncio.create_task(resumen_diario_y_reset())
