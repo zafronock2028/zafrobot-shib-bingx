@@ -1,4 +1,4 @@
-# --- ZAFROBOT SCALPER V1 ULTRA CONSERVADOR (con trailing stop agresivo, uso real del 75% y análisis más exigente) ---
+# --- ZAFROBOT SCALPER V1 ULTRA CONSERVADOR PRO (Auto-pars, 2 operaciones, trailing agresivo) ---
 
 import os
 import logging
@@ -26,23 +26,16 @@ bot_encendido = False
 operaciones_activas = []
 historial_operaciones = []
 ultimos_pares_operados = {}
+pares = []
 tiempo_espera_reentrada = 600
-max_operaciones = 1
+max_operaciones = 2
 ganancia_objetivo = 0.015
 trailing_stop_base = -0.04
 min_orden_usdt = 2.5
 
-pares = [
-    "SHIB-USDT", "PEPE-USDT", "FLOKI-USDT", "DOGE-USDT", "TRUMP-USDT",
-    "TURBO-USDT", "BONK-USDT", "KAS-USDT", "WIF-USDT", "SUI-USDT",
-    "HYPE-USDT", "HYPER-USDT", "OM-USDT", "ENA-USDT"
-]
-
 step_size_por_par = {
-    "SUI-USDT": 0.1,
-    "TRUMP-USDT": 0.01,
-    "OM-USDT": 0.01,
-    "ENA-USDT": 0.01,
+    "SUI-USDT": 0.1, "TRUMP-USDT": 0.01, "OM-USDT": 0.01, "ENA-USDT": 0.01,
+    "HYPE-USDT": 0.01, "HYPER-USDT": 0.01, "BONK-USDT": 0.01, "TURBO-USDT": 0.01
 }
 
 keyboard = ReplyKeyboardMarkup(
@@ -59,7 +52,7 @@ keyboard = ReplyKeyboardMarkup(
 
 @dp.message(Command("start"))
 async def start(message: types.Message):
-    await message.answer("✅ ¡Bienvenido al Zafrobot Scalper V1 Ultra Conservador!", reply_markup=keyboard)
+    await message.answer("✅ ¡Bienvenido al ZafroBot Scalper V1 Ultra Conservador!", reply_markup=keyboard)
 
 @dp.message()
 async def comandos(message: types.Message):
@@ -118,8 +111,8 @@ def analizar_par(par):
     try:
         velas = market_client.get_kline(symbol=par, kline_type="1min", limit=5)
         precios = [float(x[2]) for x in velas]
-        ultimo = float(velas[-1][2])
-        penultimo = float(velas[-2][2])
+        ultimo = precios[-1]
+        penultimo = precios[-2]
         impulso = (ultimo - penultimo) / penultimo
         promedio = sum(precios) / len(precios)
         volumen_24h = float(market_client.get_24h_stats(par)["volValue"])
@@ -130,21 +123,24 @@ def analizar_par(par):
             + (volumen_24h > 800000)
             + (impulso > 0.002)
         )
-        logging.info(f"[ESCANEO] {par} | Puntaje: {puntaje} | Precio: {ultimo:.6f} | Impulso: {impulso:.4f}")
         return {"par": par, "puntaje": puntaje, "precio": ultimo, "volumen": volumen_24h}
     except Exception as e:
         logging.error(f"[Error] Análisis en {par}: {e}")
         return {"par": par, "puntaje": 0, "precio": 0, "volumen": 0}
 
+async def actualizar_pares_rentables():
+    global pares
+    try:
+        tickers = market_client.get_all_tickers()["ticker"]
+        candidatos = [t["symbol"] for t in tickers if "-USDT" in t["symbol"]]
+        top = sorted(candidatos, key=lambda s: float(market_client.get_24h_stats(s)["volValue"]), reverse=True)
+        pares = top[:15]
+        logging.info(f"[PARES ACTUALIZADOS] {pares}")
+    except Exception as e:
+        logging.error(f"[Error] Actualizando pares: {e}")
+
 def calcular_porcentaje_saldo(saldo):
-    if saldo < 350:
-        return 0.75
-    elif saldo < 500:
-        return 0.60
-    elif saldo < 1000:
-        return 0.45
-    else:
-        return 0.30
+    return 0.75 / max_operaciones  # Distribuye 75% entre 2 operaciones
 
 def corregir_cantidad(orden_usdt, precio_token, par):
     step = Decimal(str(step_size_por_par.get(par, 0.0001)))
@@ -154,6 +150,7 @@ def corregir_cantidad(orden_usdt, precio_token, par):
 
 async def ciclo_completo():
     global bot_encendido, operaciones_activas
+    await actualizar_pares_rentables()
     while bot_encendido:
         if len(operaciones_activas) >= max_operaciones:
             await asyncio.sleep(10)
@@ -166,17 +163,18 @@ async def ciclo_completo():
 
         mejores = []
         for _ in range(6):
-            resultados = [analizar_par(p) for p in pares if p not in ultimos_pares_operados or (datetime.now() - ultimos_pares_operados[p]).total_seconds() >= tiempo_espera_reentrada]
+            resultados = [analizar_par(p) for p in pares if p not in [op["par"] for op in operaciones_activas]]
             mejores.extend([r for r in resultados if r["puntaje"] >= 3])
             await asyncio.sleep(0.5)
 
-        if not mejores:
-            await asyncio.sleep(10)
-            continue
+        mejores = sorted(mejores, key=lambda x: x["volumen"] * x["puntaje"], reverse=True)
+        disponibles = [m for m in mejores if m["par"] not in ultimos_pares_operados or (datetime.now() - ultimos_pares_operados[m["par"]]).total_seconds() >= tiempo_espera_reentrada]
 
-        mejor = max(mejores, key=lambda x: x["volumen"] * x["puntaje"])
-        await ejecutar_compra(mejor)
-        await asyncio.sleep(10)
+        for analisis in disponibles[:max_operaciones - len(operaciones_activas)]:
+            await ejecutar_compra(analisis)
+            await asyncio.sleep(2)
+
+        await asyncio.sleep(5)
 
 async def ejecutar_compra(analisis):
     global operaciones_activas
@@ -187,7 +185,6 @@ async def ejecutar_compra(analisis):
         return
 
     cantidad = corregir_cantidad(monto, analisis["precio"], analisis["par"])
-
     try:
         trade_client.create_market_order(symbol=analisis["par"], side="buy", size=cantidad)
         op = {
@@ -216,12 +213,7 @@ async def monitorear_salida(operacion):
             actual = float(market_client.get_ticker(par)["price"])
             max_precio = max(max_precio, actual)
             variacion = (actual - entrada) / entrada
-
-            if variacion >= ganancia_objetivo:
-                trailing_stop = max(-0.02, trailing_stop_base + min(variacion / 1.5, 0.04))
-            else:
-                trailing_stop = trailing_stop_base + min(variacion / 2, 0.03)
-
+            trailing_stop = max(-0.02, trailing_stop_base + min(variacion / (1.5 if variacion >= ganancia_objetivo else 2), 0.04))
             ganancia = (actual - entrada) * cantidad
             operacion.update({"actual": actual, "ganancia": ganancia})
 
@@ -248,7 +240,7 @@ async def monitorear_salida(operacion):
         await asyncio.sleep(4)
 
 async def resumen_diario_y_reset():
-    global bot_encendido, operaciones_activas, historial_operaciones
+    global operaciones_activas, historial_operaciones, bot_encendido
     while True:
         ahora = datetime.now()
         mañana = ahora + timedelta(days=1)
@@ -286,6 +278,7 @@ async def resumen_diario_y_reset():
 
         historial_operaciones.clear()
         operaciones_activas.clear()
+        await actualizar_pares_rentables()
         bot_encendido = True
 
 async def main():
