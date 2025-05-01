@@ -1,9 +1,10 @@
-# --- ZAFROBOT SCALPER V1 ULTRA CONSERVADOR (con uso de saldo adaptativo y 6 rondas de escaneo) ---
+# --- ZAFROBOT SCALPER V1 ULTRA CONSERVADOR (corregido con redondeo seguro de cantidad) ---
 
 import os
 import logging
 import asyncio
 from datetime import datetime, timedelta
+from decimal import Decimal, ROUND_DOWN
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.filters import Command
@@ -132,6 +133,12 @@ def calcular_porcentaje_saldo(saldo):
     else:
         return 0.30
 
+def corregir_cantidad(orden_usdt, precio_token, step=0.0001):
+    cantidad = Decimal(str(orden_usdt)) / Decimal(str(precio_token))
+    incremento = Decimal(str(step))
+    cantidad_corr = (cantidad // incremento) * incremento
+    return str(cantidad_corr.quantize(incremento, rounding=ROUND_DOWN))
+
 async def ciclo_completo():
     global bot_encendido, operaciones_activas
     while bot_encendido:
@@ -166,10 +173,17 @@ async def ejecutar_compra(analisis):
     if monto > saldo:
         return
 
-    cantidad = round(monto / analisis["precio"], 2)
+    cantidad = corregir_cantidad(monto, analisis["precio"], step=0.0001)
+
     try:
-        trade_client.create_market_order(symbol=analisis["par"], side="buy", size=str(cantidad))
-        op = {"par": analisis["par"], "entrada": analisis["precio"], "cantidad": cantidad, "ganancia": 0.0, "actual": analisis["precio"]}
+        trade_client.create_market_order(symbol=analisis["par"], side="buy", size=cantidad)
+        op = {
+            "par": analisis["par"],
+            "entrada": analisis["precio"],
+            "cantidad": float(cantidad),
+            "ganancia": 0.0,
+            "actual": analisis["precio"]
+        }
         operaciones_activas.append(op)
         await bot.send_message(
             CHAT_ID,
