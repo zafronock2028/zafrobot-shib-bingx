@@ -139,24 +139,30 @@ def corregir_cantidad(orden_usdt, precio_token, par):
     cantidad_corr = (cantidad // step) * step
     return str(cantidad_corr.quantize(step, rounding=ROUND_DOWN))
 
-# --- Ciclo principal ---
+async def actualizar_pares_rentables():
+    global pares
+    try:
+        tickers = market_client.get_all_tickers()["ticker"]
+        candidatos = [t["symbol"] for t in tickers if "-USDT" in t["symbol"]]
+        top = sorted(candidatos, key=lambda s: float(market_client.get_24h_stats(s)["volValue"]), reverse=True)
+        pares = top[:15]
+        logging.info(f"[Actualización diaria de pares] {pares}")
+    except Exception as e:
+        logging.error(f"[Error] Actualizando pares: {e}")
+
 async def ciclo_completo():
     global bot_encendido, operaciones_activas
     await asyncio.sleep(10)
-
     while bot_encendido:
         async with lock_operaciones:
             if len(operaciones_activas) >= max_operaciones:
                 await asyncio.sleep(10)
                 continue
-
             saldo = await obtener_saldo_disponible()
             if saldo < min_orden_usdt:
                 await asyncio.sleep(15)
                 continue
-
             await actualizar_pares_rentables()
-
             mejores = []
             for _ in range(6):
                 resultados = [
@@ -165,25 +171,20 @@ async def ciclo_completo():
                 ]
                 mejores.extend([r for r in resultados if r["puntaje"] >= 3])
                 await asyncio.sleep(1)
-
             if not mejores:
                 logging.info("[Análisis] No se encontraron oportunidades en este ciclo.")
                 await asyncio.sleep(10)
                 continue
-
             mejores = sorted(mejores, key=lambda x: x["volumen"] * x["puntaje"], reverse=True)
-
             disponibles = [
                 m for m in mejores
                 if m["par"] not in ultimos_pares_operados or
                 (datetime.now() - ultimos_pares_operados[m["par"]]).total_seconds() >= tiempo_espera_reentrada
             ]
-
             for analisis in disponibles:
                 if analisis["par"] not in [op["par"] for op in operaciones_activas]:
                     await ejecutar_compra(analisis)
                     break
-
         await asyncio.sleep(5)
 
 async def ejecutar_compra(analisis):
@@ -193,7 +194,6 @@ async def ejecutar_compra(analisis):
     monto = max(saldo * porcentaje, min_orden_usdt)
     if monto > saldo:
         return
-
     cantidad = corregir_cantidad(monto, analisis["precio"], analisis["par"])
     try:
         trade_client.create_market_order(symbol=analisis["par"], side="buy", size=cantidad)
@@ -218,7 +218,6 @@ async def monitorear_salida(operacion):
     global operaciones_activas, historial_operaciones
     entrada, cantidad, par = operacion["entrada"], operacion["cantidad"], operacion["par"]
     max_precio = entrada
-
     while True:
         try:
             actual = float(market_client.get_ticker(par)["price"])
@@ -227,7 +226,6 @@ async def monitorear_salida(operacion):
             trailing_stop = max(-0.02, trailing_stop_base + min(variacion / (1.5 if variacion >= ganancia_objetivo else 2), 0.04))
             ganancia = (actual - entrada) * cantidad
             operacion.update({"actual": actual, "ganancia": ganancia})
-
             if variacion >= ganancia_objetivo or ((actual - max_precio) / max_precio) <= trailing_stop:
                 trade_client.create_market_order(symbol=par, side="sell", size=str(cantidad))
                 operaciones_activas.remove(operacion)
@@ -251,17 +249,6 @@ async def monitorear_salida(operacion):
             logging.error(f"[Error] Monitoreando {par}: {e}")
         await asyncio.sleep(4)
 
-async def actualizar_pares_rentables():
-    global pares
-    try:
-        tickers = market_client.get_all_tickers()["ticker"]
-        candidatos = [t["symbol"] for t in tickers if "-USDT" in t["symbol"]]
-        top = sorted(candidatos, key=lambda s: float(market_client.get_24h_stats(s)["volValue"]), reverse=True)
-        pares = top[:15]
-        logging.info(f"[Actualización diaria de pares] {pares}")
-    except Exception as e:
-        logging.error(f"[Error] Actualizando pares: {e}")
-
 async def resumen_diario_y_reset():
     global operaciones_activas, historial_operaciones, bot_encendido
     while True:
@@ -269,7 +256,6 @@ async def resumen_diario_y_reset():
         mañana = ahora + timedelta(days=1)
         espera = (datetime(mañana.year, mañana.month, mañana.day) - ahora).total_seconds()
         await asyncio.sleep(espera)
-
         for op in list(operaciones_activas):
             try:
                 trade_client.create_market_order(symbol=op['par'], side="sell", size=str(op['cantidad']))
@@ -290,7 +276,6 @@ async def resumen_diario_y_reset():
                 )
             except Exception as e:
                 logging.error(f"[Error] Cierre: {e}")
-
         if historial_operaciones:
             total = sum(h["ganancia"] for h in historial_operaciones)
             resumen = "📊 *Resumen Diario*\n\n" + "\n".join(
@@ -298,7 +283,6 @@ async def resumen_diario_y_reset():
                 for h in historial_operaciones
             ) + f"\n\n🧮 Total del día: `{total:.4f} USDT`"
             await bot.send_message(CHAT_ID, resumen)
-
         historial_operaciones.clear()
         operaciones_activas.clear()
         await actualizar_pares_rentables()
