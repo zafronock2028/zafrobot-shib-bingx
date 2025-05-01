@@ -1,4 +1,4 @@
-# --- ZAFROBOT SCALPER V1 ULTRA CONSERVADOR PRO ---
+# --- ZAFROBOT SCALPER V1 ULTRA CONSERVADOR PRO FINAL ---
 
 import os
 import logging
@@ -49,9 +49,7 @@ keyboard = ReplyKeyboardMarkup(
         [KeyboardButton(text="🧾 Historial de Ganancias")]
     ],
     resize_keyboard=True
-)
-
-@dp.message(Command("start"))
+)@dp.message(Command("start"))
 async def start(message: types.Message):
     await message.answer("✅ ¡Bienvenido al ZafroBot Scalper V1 Ultra Conservador!", reply_markup=keyboard)
 
@@ -148,11 +146,10 @@ def corregir_cantidad(orden_usdt, precio_token, par):
     step = Decimal(str(step_size_por_par.get(par, 0.0001)))
     cantidad = Decimal(str(orden_usdt)) / Decimal(str(precio_token))
     cantidad_corr = (cantidad // step) * step
-    return str(cantidad_corr.quantize(step, rounding=ROUND_DOWN))
-
-async def ciclo_completo():
+    return str(cantidad_corr.quantize(step, rounding=ROUND_DOWN))async def ciclo_completo():
     global bot_encendido, operaciones_activas
-    await actualizar_pares_rentables()
+    await asyncio.sleep(10)  # Delay inicial tras encender
+
     while bot_encendido:
         async with lock_operaciones:
             if len(operaciones_activas) >= max_operaciones:
@@ -164,18 +161,34 @@ async def ciclo_completo():
                 await asyncio.sleep(15)
                 continue
 
+            await actualizar_pares_rentables()
+
             mejores = []
             for _ in range(6):
-                resultados = [analizar_par(p) for p in pares if p not in [op["par"] for op in operaciones_activas]]
+                resultados = [
+                    analizar_par(p) for p in pares
+                    if p not in [op["par"] for op in operaciones_activas]
+                ]
                 mejores.extend([r for r in resultados if r["puntaje"] >= 3])
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(1)
+
+            if not mejores:
+                logging.info("[Análisis] No se encontraron oportunidades en este ciclo.")
+                await asyncio.sleep(10)
+                continue
 
             mejores = sorted(mejores, key=lambda x: x["volumen"] * x["puntaje"], reverse=True)
-            disponibles = [m for m in mejores if m["par"] not in ultimos_pares_operados or (datetime.now() - ultimos_pares_operados[m["par"]]).total_seconds() >= tiempo_espera_reentrada]
 
-            for analisis in disponibles[:max_operaciones - len(operaciones_activas)]:
-                await ejecutar_compra(analisis)
-                await asyncio.sleep(2)
+            disponibles = [
+                m for m in mejores
+                if m["par"] not in ultimos_pares_operados or
+                (datetime.now() - ultimos_pares_operados[m["par"]]).total_seconds() >= tiempo_espera_reentrada
+            ]
+
+            for analisis in disponibles:
+                if analisis["par"] not in [op["par"] for op in operaciones_activas]:
+                    await ejecutar_compra(analisis)
+                    break
 
         await asyncio.sleep(5)
 
