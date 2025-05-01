@@ -1,4 +1,4 @@
-# --- ZAFROBOT SCALPER V1 ULTRA CONSERVADOR PRO (Auto-pars, 2 operaciones, trailing agresivo) ---
+# --- ZAFROBOT SCALPER V1 ULTRA CONSERVADOR PRO (Auto-pars, 2 operaciones, trailing agresivo, logs visibles, control de ejecución) ---
 
 import os
 import logging
@@ -27,6 +27,7 @@ operaciones_activas = []
 historial_operaciones = []
 ultimos_pares_operados = {}
 pares = []
+lock_operaciones = asyncio.Lock()
 tiempo_espera_reentrada = 600
 max_operaciones = 2
 ganancia_objetivo = 0.015
@@ -123,6 +124,7 @@ def analizar_par(par):
             + (volumen_24h > 800000)
             + (impulso > 0.002)
         )
+        logging.info(f"[Análisis] {par} | Precio: {ultimo:.6f} | Puntaje: {puntaje} | Impulso: {impulso:.4f} | Vol24h: {volumen_24h:.2f}")
         return {"par": par, "puntaje": puntaje, "precio": ultimo, "volumen": volumen_24h}
     except Exception as e:
         logging.error(f"[Error] Análisis en {par}: {e}")
@@ -135,12 +137,12 @@ async def actualizar_pares_rentables():
         candidatos = [t["symbol"] for t in tickers if "-USDT" in t["symbol"]]
         top = sorted(candidatos, key=lambda s: float(market_client.get_24h_stats(s)["volValue"]), reverse=True)
         pares = top[:15]
-        logging.info(f"[PARES ACTUALIZADOS] {pares}")
+        logging.info(f"[Actualización diaria de pares] {pares}")
     except Exception as e:
         logging.error(f"[Error] Actualizando pares: {e}")
 
 def calcular_porcentaje_saldo(saldo):
-    return 0.75 / max_operaciones  # Distribuye 75% entre 2 operaciones
+    return 0.75 / max_operaciones
 
 def corregir_cantidad(orden_usdt, precio_token, par):
     step = Decimal(str(step_size_por_par.get(par, 0.0001)))
@@ -152,27 +154,28 @@ async def ciclo_completo():
     global bot_encendido, operaciones_activas
     await actualizar_pares_rentables()
     while bot_encendido:
-        if len(operaciones_activas) >= max_operaciones:
-            await asyncio.sleep(10)
-            continue
+        async with lock_operaciones:
+            if len(operaciones_activas) >= max_operaciones:
+                await asyncio.sleep(10)
+                continue
 
-        saldo = await obtener_saldo_disponible()
-        if saldo < min_orden_usdt:
-            await asyncio.sleep(15)
-            continue
+            saldo = await obtener_saldo_disponible()
+            if saldo < min_orden_usdt:
+                await asyncio.sleep(15)
+                continue
 
-        mejores = []
-        for _ in range(6):
-            resultados = [analizar_par(p) for p in pares if p not in [op["par"] for op in operaciones_activas]]
-            mejores.extend([r for r in resultados if r["puntaje"] >= 3])
-            await asyncio.sleep(0.5)
+            mejores = []
+            for _ in range(6):
+                resultados = [analizar_par(p) for p in pares if p not in [op["par"] for op in operaciones_activas]]
+                mejores.extend([r for r in resultados if r["puntaje"] >= 3])
+                await asyncio.sleep(0.5)
 
-        mejores = sorted(mejores, key=lambda x: x["volumen"] * x["puntaje"], reverse=True)
-        disponibles = [m for m in mejores if m["par"] not in ultimos_pares_operados or (datetime.now() - ultimos_pares_operados[m["par"]]).total_seconds() >= tiempo_espera_reentrada]
+            mejores = sorted(mejores, key=lambda x: x["volumen"] * x["puntaje"], reverse=True)
+            disponibles = [m for m in mejores if m["par"] not in ultimos_pares_operados or (datetime.now() - ultimos_pares_operados[m["par"]]).total_seconds() >= tiempo_espera_reentrada]
 
-        for analisis in disponibles[:max_operaciones - len(operaciones_activas)]:
-            await ejecutar_compra(analisis)
-            await asyncio.sleep(2)
+            for analisis in disponibles[:max_operaciones - len(operaciones_activas)]:
+                await ejecutar_compra(analisis)
+                await asyncio.sleep(2)
 
         await asyncio.sleep(5)
 
@@ -195,6 +198,7 @@ async def ejecutar_compra(analisis):
             "actual": analisis["precio"]
         }
         operaciones_activas.append(op)
+        logging.info(f"[COMPRA] {analisis['par']} a {analisis['precio']:.6f} | Cantidad: {cantidad}")
         await bot.send_message(
             CHAT_ID,
             f"✅ *COMPRA REALIZADA*\nPar: `{analisis['par']}`\nPrecio: `{analisis['precio']:.6f}`\nCantidad: `{cantidad}`"
@@ -230,6 +234,7 @@ async def monitorear_salida(operacion):
                     "resultado": resultado,
                     "saldo": saldo_actual
                 })
+                logging.info(f"[VENTA] {par} | Precio: {actual:.6f} | Ganancia: {ganancia:.4f}")
                 await bot.send_message(
                     CHAT_ID,
                     f"🔴 *VENTA EJECUTADA*\nPar: `{par}`\nPrecio: `{actual:.6f}`\nGanancia: `{ganancia:.4f}`\n{resultado}"
@@ -282,7 +287,7 @@ async def resumen_diario_y_reset():
         bot_encendido = True
 
 async def main():
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
     asyncio.create_task(resumen_diario_y_reset())
     await dp.start_polling(bot)
 
