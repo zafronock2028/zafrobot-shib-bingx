@@ -139,7 +139,7 @@ def corregir_cantidad(orden_usdt, precio_token, par):
     cantidad_corr = (cantidad // step) * step
     return str(cantidad_corr.quantize(step, rounding=ROUND_DOWN))
 
-# --- Aquí inicia el ciclo principal del bot ---
+# --- Ciclo principal ---
 async def ciclo_completo():
     global bot_encendido, operaciones_activas
     await asyncio.sleep(10)
@@ -186,7 +186,6 @@ async def ciclo_completo():
 
         await asyncio.sleep(5)
 
-# --- Ejecuta una compra ---
 async def ejecutar_compra(analisis):
     global operaciones_activas
     saldo = await obtener_saldo_disponible()
@@ -215,7 +214,6 @@ async def ejecutar_compra(analisis):
     except Exception as e:
         logging.error(f"[Error] Compra en {analisis['par']}: {e}")
 
-# --- Monitorea la venta y cierra la operación ---
 async def monitorear_salida(operacion):
     global operaciones_activas, historial_operaciones
     entrada, cantidad, par = operacion["entrada"], operacion["cantidad"], operacion["par"]
@@ -253,7 +251,17 @@ async def monitorear_salida(operacion):
             logging.error(f"[Error] Monitoreando {par}: {e}")
         await asyncio.sleep(4)
 
-# --- Resumen diario automático ---
+async def actualizar_pares_rentables():
+    global pares
+    try:
+        tickers = market_client.get_all_tickers()["ticker"]
+        candidatos = [t["symbol"] for t in tickers if "-USDT" in t["symbol"]]
+        top = sorted(candidatos, key=lambda s: float(market_client.get_24h_stats(s)["volValue"]), reverse=True)
+        pares = top[:15]
+        logging.info(f"[Actualización diaria de pares] {pares}")
+    except Exception as e:
+        logging.error(f"[Error] Actualizando pares: {e}")
+
 async def resumen_diario_y_reset():
     global operaciones_activas, historial_operaciones, bot_encendido
     while True:
@@ -296,7 +304,6 @@ async def resumen_diario_y_reset():
         await actualizar_pares_rentables()
         bot_encendido = True
 
-# --- Arranque del bot ---
 async def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
     asyncio.create_task(resumen_diario_y_reset())
