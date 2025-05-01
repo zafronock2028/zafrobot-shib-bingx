@@ -1,4 +1,4 @@
-# --- ZAFROBOT SCALPER V1 ULTRA CONSERVADOR (con trailing stop agresivo y uso real del 75%) ---
+# --- ZAFROBOT SCALPER V1 ULTRA CONSERVADOR (con trailing stop agresivo, uso real del 75% y análisis más exigente) ---
 
 import os
 import logging
@@ -118,13 +118,20 @@ def analizar_par(par):
     try:
         velas = market_client.get_kline(symbol=par, kline_type="1min", limit=5)
         precios = [float(x[2]) for x in velas]
+        ultimo = float(velas[-1][2])
+        penultimo = float(velas[-2][2])
+        impulso = (ultimo - penultimo) / penultimo
         promedio = sum(precios) / len(precios)
-        actual = precios[-1]
         volumen_24h = float(market_client.get_24h_stats(par)["volValue"])
-        spread = abs(actual - promedio) / promedio
-        puntaje = (actual > promedio) + (spread < 0.02) + (volumen_24h > 500000)
-        logging.info(f"[ESCANEO] {par} | Puntaje: {puntaje} | Precio: {actual:.6f} | Prom: {promedio:.6f} | Vol24h: {volumen_24h:.2f}")
-        return {"par": par, "puntaje": puntaje, "precio": actual, "volumen": volumen_24h}
+        spread = abs(ultimo - promedio) / promedio
+        puntaje = (
+            (ultimo > promedio)
+            + (spread < 0.02)
+            + (volumen_24h > 800000)
+            + (impulso > 0.002)
+        )
+        logging.info(f"[ESCANEO] {par} | Puntaje: {puntaje} | Precio: {ultimo:.6f} | Impulso: {impulso:.4f}")
+        return {"par": par, "puntaje": puntaje, "precio": ultimo, "volumen": volumen_24h}
     except Exception as e:
         logging.error(f"[Error] Análisis en {par}: {e}")
         return {"par": par, "puntaje": 0, "precio": 0, "volumen": 0}
@@ -160,7 +167,7 @@ async def ciclo_completo():
         mejores = []
         for _ in range(6):
             resultados = [analizar_par(p) for p in pares if p not in ultimos_pares_operados or (datetime.now() - ultimos_pares_operados[p]).total_seconds() >= tiempo_espera_reentrada]
-            mejores.extend([r for r in resultados if r["puntaje"] >= 2])
+            mejores.extend([r for r in resultados if r["puntaje"] >= 3])
             await asyncio.sleep(0.5)
 
         if not mejores:
@@ -210,7 +217,6 @@ async def monitorear_salida(operacion):
             max_precio = max(max_precio, actual)
             variacion = (actual - entrada) / entrada
 
-            # Trailing stop más agresivo si llega a la ganancia objetivo
             if variacion >= ganancia_objetivo:
                 trailing_stop = max(-0.02, trailing_stop_base + min(variacion / 1.5, 0.04))
             else:
