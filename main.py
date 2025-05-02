@@ -29,20 +29,21 @@ bot_encendido = False
 operaciones_activas = []
 historial_operaciones = []
 ultimos_pares_operados = {}
-pares = []
 lock_operaciones = asyncio.Lock()
-tiempo_espera_reentrada = 600
+
+# Lista de los 15 pares a escanear
+pares = [
+    "SHIB-USDT", "PEPE-USDT", "FLOKI-USDT", "DOGE-USDT", "TRUMP-USDT",
+    "SUI-USDT", "TURBO-USDT", "BONK-USDT", "KAS-USDT", "WIF-USDT",
+    "XMR-USDT", "HYPE-USDT", "HYPER-USDT", "OM-USDT", "ENA-USDT"
+]
+
+tiempo_espera_reentrada = 600  # 10 minutos antes de permitir reentrada en el mismo par
 max_operaciones = 3
 uso_saldo_total = 0.80
 trailing_stop_base = -0.008
 ganancia_objetivo = 0.005
 min_orden_usdt = 2.5
-
-step_size_por_par = {
-    "SUI-USDT": 0.1, "TRUMP-USDT": 0.01, "OM-USDT": 0.01, "ENA-USDT": 0.01,
-    "HYPE-USDT": 0.01, "HYPER-USDT": 0.01, "BONK-USDT": 0.01, "TURBO-USDT": 0.01
-}
-
 # Teclado
 keyboard = ReplyKeyboardMarkup(
     keyboard=[
