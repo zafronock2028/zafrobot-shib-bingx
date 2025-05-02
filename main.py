@@ -1,6 +1,7 @@
 # --- ZAFROBOT SCALPER ULTRA PRO MICROGANANCIAS FINAL ---
 import os
 import logging
+logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(message)s')
 import asyncio
 from datetime import datetime, timedelta
 from decimal import Decimal, ROUND_DOWN
