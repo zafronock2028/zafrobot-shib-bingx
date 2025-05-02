@@ -31,20 +31,26 @@ historial_operaciones = []
 ultimos_pares_operados = {}
 lock_operaciones = asyncio.Lock()
 
-# Lista de los 15 pares a escanear
+# Lista de 15 pares a escanear
 pares = [
     "SHIB-USDT", "PEPE-USDT", "FLOKI-USDT", "DOGE-USDT", "TRUMP-USDT",
     "SUI-USDT", "TURBO-USDT", "BONK-USDT", "KAS-USDT", "WIF-USDT",
     "XMR-USDT", "HYPE-USDT", "HYPER-USDT", "OM-USDT", "ENA-USDT"
 ]
 
-tiempo_espera_reentrada = 600  # 10 minutos antes de permitir reentrada en el mismo par
+tiempo_espera_reentrada = 600
 max_operaciones = 3
 uso_saldo_total = 0.80
 trailing_stop_base = -0.008
 ganancia_objetivo = 0.005
 min_orden_usdt = 2.5
-# Teclado
+
+# Tamaños mínimos por par
+step_size_por_par = {
+    "SUI-USDT": 0.1, "TRUMP-USDT": 0.01, "OM-USDT": 0.01, "ENA-USDT": 0.01,
+    "HYPE-USDT": 0.01, "HYPER-USDT": 0.01, "BONK-USDT": 0.01, "TURBO-USDT": 0.01
+}
+
 keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🚀 Encender Bot")],
@@ -84,13 +90,12 @@ async def comandos(message: types.Message):
         if operaciones_activas:
             mensaje = ""
             for op in operaciones_activas:
-                msg = (
+                mensaje += (
                     f"Par: {op['par']}\n"
                     f"Entrada: {op['entrada']:.6f}\n"
                     f"Actual: {op['actual']:.6f}\n"
                     f"Ganancia: {op['ganancia']:.4f} USDT\n\n"
                 )
-                mensaje += msg
             await message.answer(mensaje)
         else:
             await message.answer("⚠️ No hay operaciones activas.")
@@ -130,6 +135,7 @@ def analizar_par(par):
         volumen = float(market_client.get_24h_stats(par)["volValue"])
         impulso = (precios[-1] - precios[-2]) / precios[-2]
         if impulso > 0 and spread < 0.02 and volumen > 500000:
+            logging.info(f"[Análisis] {par} | Precio: {ultimo:.6f} | Volumen: {volumen:.0f} | Impulso: {impulso:.4f}")
             return {"par": par, "precio": ultimo, "valido": True, "vol": volumen}
     except Exception as e:
         logging.error(f"[Análisis] {par} Error: {e}")
@@ -142,16 +148,17 @@ async def actualizar_pares():
         candidatos = [x["symbol"] for x in tickers if "-USDT" in x["symbol"]]
         top = sorted(candidatos, key=lambda s: float(market_client.get_24h_stats(s)["volValue"]), reverse=True)
         pares = top[:15]
+        logging.info(f"[Pares actualizados] {pares}")
     except Exception as e:
         logging.error(f"[Pares] Error: {e}")
 
 async def ciclo_completo():
     global operaciones_activas
-    await asyncio.sleep(8)
+    await asyncio.sleep(5)
     while bot_encendido:
         async with lock_operaciones:
             if len(operaciones_activas) >= max_operaciones:
-                await asyncio.sleep(5)
+                await asyncio.sleep(4)
                 continue
 
             await actualizar_pares()
@@ -185,7 +192,7 @@ async def ciclo_completo():
                     break
                 except Exception as e:
                     logging.error(f"[Error Compra] {par}: {e}")
-        await asyncio.sleep(3)
+        await asyncio.sleep(2)
 
 async def monitorear(operacion):
     global operaciones_activas, historial_operaciones
@@ -216,6 +223,7 @@ async def monitorear(operacion):
                     "resultado": resultado,
                     "saldo": saldo_actual
                 })
+                logging.info(f"[VENTA] {par} | Salida: {actual:.6f} | Ganancia: {ganancia:.4f}")
                 await bot.send_message(
                     CHAT_ID,
                     f"🔴 *VENTA EJECUTADA*\nPar: `{par}`\nSalida: `{actual:.6f}`\nGanancia: `{ganancia:.4f}` {resultado}"
@@ -223,10 +231,9 @@ async def monitorear(operacion):
                 break
         except Exception as e:
             logging.error(f"[Monitoreo] {par}: {e}")
-        await asyncio.sleep(4)
+        await asyncio.sleep(3)
 
 async def main():
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
