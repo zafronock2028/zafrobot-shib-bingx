@@ -3,7 +3,7 @@ import os
 import logging
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(message)s')
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime
 from decimal import Decimal, ROUND_DOWN
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
@@ -17,21 +17,18 @@ API_PASS = os.getenv("API_PASSPHRASE")
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
-# Inicialización
 bot = Bot(token=TOKEN, parse_mode="Markdown")
 dp = Dispatcher()
 market_client = Market()
 trade_client = Trade(key=API_KEY, secret=SECRET_KEY, passphrase=API_PASS)
 user_client = User(API_KEY, SECRET_KEY, API_PASS)
 
-# Configuración
+# Configuración general
 bot_encendido = False
 operaciones_activas = []
 historial_operaciones = []
 ultimos_pares_operados = {}
 lock_operaciones = asyncio.Lock()
-
-# Lista de 15 pares a escanear
 pares = [
     "SHIB-USDT", "PEPE-USDT", "FLOKI-USDT", "DOGE-USDT", "TRUMP-USDT",
     "SUI-USDT", "TURBO-USDT", "BONK-USDT", "KAS-USDT", "WIF-USDT",
@@ -45,7 +42,6 @@ trailing_stop_base = -0.008
 ganancia_objetivo = 0.005
 min_orden_usdt = 2.5
 
-# Tamaños mínimos por par
 step_size_por_par = {
     "SUI-USDT": 0.1, "TRUMP-USDT": 0.01, "OM-USDT": 0.01, "ENA-USDT": 0.01,
     "HYPE-USDT": 0.01, "HYPER-USDT": 0.01, "BONK-USDT": 0.01, "TURBO-USDT": 0.01
@@ -94,7 +90,7 @@ async def comandos(message: types.Message):
                     f"Par: {op['par']}\n"
                     f"Entrada: {op['entrada']:.6f}\n"
                     f"Actual: {op['actual']:.6f}\n"
-                    f"Ganancia: {op['ganancia']:.4f} USDT\n\n"
+                    f"Ganancia neta: {op['ganancia']:.4f} USDT\n\n"
                 )
             await message.answer(mensaje)
         else:
@@ -141,27 +137,15 @@ def analizar_par(par):
         logging.error(f"[Análisis] {par} Error: {e}")
     return {"par": par, "valido": False}
 
-async def actualizar_pares():
-    global pares
-    try:
-        tickers = market_client.get_all_tickers()["ticker"]
-        candidatos = [x["symbol"] for x in tickers if "-USDT" in x["symbol"]]
-        top = sorted(candidatos, key=lambda s: float(market_client.get_24h_stats(s)["volValue"]), reverse=True)
-        pares = top[:15]
-        logging.info(f"[Pares actualizados] {pares}")
-    except Exception as e:
-        logging.error(f"[Pares] Error: {e}")
-
 async def ciclo_completo():
     global operaciones_activas
-    await asyncio.sleep(5)
+    await asyncio.sleep(4)
     while bot_encendido:
         async with lock_operaciones:
             if len(operaciones_activas) >= max_operaciones:
                 await asyncio.sleep(4)
                 continue
 
-            await actualizar_pares()
             saldo = await obtener_saldo_disponible()
             monto = (saldo * uso_saldo_total) / max_operaciones
 
@@ -191,7 +175,7 @@ async def ciclo_completo():
                     asyncio.create_task(monitorear(op))
                     break
                 except Exception as e:
-                    logging.error(f"[Error Compra] {par}: {e}")
+                    logging.error(f"[Compra] {par}: {e}")
         await asyncio.sleep(2)
 
 async def monitorear(operacion):
@@ -207,26 +191,33 @@ async def monitorear(operacion):
             max_precio = max(max_precio, actual)
             variacion = (actual - entrada) / entrada
             trailing = max(trailing_stop_base, -0.002)
-            ganancia = (actual - entrada) * cantidad
-            operacion.update({"actual": actual, "ganancia": ganancia})
+
+            ganancia_bruta = (actual - entrada) * cantidad
+            comision_total = entrada * cantidad * 0.0016  # 0.08% compra + 0.08% venta
+            ganancia_neta = ganancia_bruta - comision_total
+            operacion.update({"actual": actual, "ganancia": ganancia_neta})
 
             if variacion >= ganancia_objetivo or ((actual - max_precio) / max_precio) <= trailing:
                 trade_client.create_market_order(symbol=par, side="sell", size=str(cantidad))
                 operaciones_activas.remove(operacion)
                 ultimos_pares_operados[par] = datetime.now()
-                resultado = "✅ GANADA" if ganancia >= 0 else "❌ PERDIDA"
+                resultado = "✅ GANADA" if ganancia_neta >= 0 else "❌ PERDIDA"
                 saldo_actual = await obtener_saldo_disponible()
                 historial_operaciones.append({
                     "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
                     "par": par,
-                    "ganancia": ganancia,
+                    "ganancia": ganancia_neta,
                     "resultado": resultado,
                     "saldo": saldo_actual
                 })
-                logging.info(f"[VENTA] {par} | Salida: {actual:.6f} | Ganancia: {ganancia:.4f}")
+                logging.info(f"[VENTA] {par} | Entrada: {entrada:.6f} | Salida: {actual:.6f} | Bruta: {ganancia_bruta:.4f} | Comisión: {comision_total:.4f} | Neta: {ganancia_neta:.4f}")
                 await bot.send_message(
                     CHAT_ID,
-                    f"🔴 *VENTA EJECUTADA*\nPar: `{par}`\nSalida: `{actual:.6f}`\nGanancia: `{ganancia:.4f}` {resultado}"
+                    f"🔴 *VENTA EJECUTADA*\nPar: `{par}`\n"
+                    f"Entrada: `{entrada:.6f}`\nSalida: `{actual:.6f}`\n"
+                    f"Ganancia bruta: `{ganancia_bruta:.4f}`\n"
+                    f"Comisiones: `-{comision_total:.4f}`\n"
+                    f"Ganancia neta: `{ganancia_neta:.4f}` {resultado}"
                 )
                 break
         except Exception as e:
