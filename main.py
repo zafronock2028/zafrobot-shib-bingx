@@ -1,4 +1,4 @@
-# --- ZAFROBOT SCALPER V1 ULTRA CONSERVADOR FINALIZADO ---
+# --- ZAFROBOT SCALPER V1 ULTRA CONSERVADOR FINAL ---
 import os
 import logging
 import asyncio
@@ -23,7 +23,7 @@ market_client = Market()
 trade_client = Trade(key=API_KEY, secret=SECRET_KEY, passphrase=API_PASS)
 user_client = User(API_KEY, SECRET_KEY, API_PASS)
 
-# Variables globales
+# Configuración general
 bot_encendido = False
 operaciones_activas = []
 historial_operaciones = []
@@ -148,45 +148,53 @@ async def actualizar_pares_rentables():
         candidatos = [t["symbol"] for t in tickers if "-USDT" in t["symbol"]]
         top = sorted(candidatos, key=lambda s: float(market_client.get_24h_stats(s)["volValue"]), reverse=True)
         pares = top[:15]
-        logging.info(f"[Actualización de pares] {pares}")
+        logging.info(f"[Pares rentables] Top pares: {pares}")
     except Exception as e:
         logging.error(f"[Error] Actualizando pares: {e}")
 
 async def ciclo_completo():
     global bot_encendido, operaciones_activas
-    await asyncio.sleep(10)
+    await asyncio.sleep(5)
     while bot_encendido:
         async with lock_operaciones:
             if len(operaciones_activas) >= max_operaciones:
+                logging.info("[Ciclo] Límite de operaciones activas alcanzado.")
                 await asyncio.sleep(10)
                 continue
+
             saldo = await obtener_saldo_disponible()
             if saldo < min_orden_usdt:
+                logging.info("[Ciclo] Saldo insuficiente para operar.")
                 await asyncio.sleep(15)
                 continue
+
             await actualizar_pares_rentables()
             mejores = []
-            for _ in range(6):
+            for _ in range(4):
                 resultados = [
                     analizar_par(p) for p in pares
                     if p not in [op["par"] for op in operaciones_activas]
                 ]
                 mejores.extend([r for r in resultados if r["puntaje"] >= 3])
                 await asyncio.sleep(1)
+
             if not mejores:
-                logging.info("[Análisis] No se encontraron oportunidades.")
+                logging.info("[Ciclo] No se encontraron oportunidades.")
                 await asyncio.sleep(10)
                 continue
+
             mejores = sorted(mejores, key=lambda x: x["volumen"] * x["puntaje"], reverse=True)
             disponibles = [
                 m for m in mejores
                 if m["par"] not in ultimos_pares_operados or
                 (datetime.now() - ultimos_pares_operados[m["par"]]).total_seconds() >= tiempo_espera_reentrada
             ]
+
             for analisis in disponibles:
                 if analisis["par"] not in [op["par"] for op in operaciones_activas]:
                     await ejecutar_compra(analisis)
                     break
+
         await asyncio.sleep(5)
 
 async def ejecutar_compra(analisis):
@@ -195,7 +203,9 @@ async def ejecutar_compra(analisis):
     porcentaje = calcular_porcentaje_saldo(saldo)
     monto = max(saldo * porcentaje, min_orden_usdt)
     if monto > saldo:
+        logging.warning("[Compra] Saldo insuficiente.")
         return
+
     cantidad = corregir_cantidad(monto, analisis["precio"], analisis["par"])
     try:
         trade_client.create_market_order(symbol=analisis["par"], side="buy", size=cantidad)
