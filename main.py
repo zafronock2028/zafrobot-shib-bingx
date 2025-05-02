@@ -1,5 +1,4 @@
 # --- ZAFROBOT SCALPER V1 ULTRA CONSERVADOR FINALIZADO ---
-
 import os
 import logging
 import asyncio
@@ -35,13 +34,13 @@ tiempo_espera_reentrada = 600
 max_operaciones = 2
 ganancia_objetivo = 0.015
 trailing_stop_base = -0.04
-min_orden_usdt = 2.5# Tamaños mínimos por par
+min_orden_usdt = 2.5
 step_size_por_par = {
     "SUI-USDT": 0.1, "TRUMP-USDT": 0.01, "OM-USDT": 0.01, "ENA-USDT": 0.01,
     "HYPE-USDT": 0.01, "HYPER-USDT": 0.01, "BONK-USDT": 0.01, "TURBO-USDT": 0.01
 }
 
-# Teclado del bot
+# Teclado Telegram
 keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🚀 Encender Bot")],
@@ -101,7 +100,8 @@ async def comandos(message: types.Message):
                 )
             await message.answer(mensaje)
         else:
-            await message.answer("⚠️ Aún no hay historial.")# Obtener saldo disponible
+            await message.answer("⚠️ Aún no hay historial.")
+
 async def obtener_saldo_disponible():
     try:
         cuentas = user_client.get_account_list()
@@ -110,18 +110,15 @@ async def obtener_saldo_disponible():
         logging.error(f"[Error] Obteniendo saldo: {e}")
         return 0.0
 
-# Calcular porcentaje de uso por operación
 def calcular_porcentaje_saldo(saldo):
     return 0.75 / max_operaciones
 
-# Corregir cantidad según el step_size
 def corregir_cantidad(orden_usdt, precio_token, par):
     step = Decimal(str(step_size_por_par.get(par, 0.0001)))
     cantidad = Decimal(str(orden_usdt)) / Decimal(str(precio_token))
     cantidad_corr = (cantidad // step) * step
     return str(cantidad_corr.quantize(step, rounding=ROUND_DOWN))
 
-# Análisis técnico simple del par
 def analizar_par(par):
     try:
         velas = market_client.get_kline(symbol=par, kline_type="1min", limit=5)
@@ -144,7 +141,6 @@ def analizar_par(par):
         logging.error(f"[Error] Análisis en {par}: {e}")
         return {"par": par, "puntaje": 0, "precio": 0, "volumen": 0}
 
-# Actualizar pares top
 async def actualizar_pares_rentables():
     global pares
     try:
@@ -156,7 +152,6 @@ async def actualizar_pares_rentables():
     except Exception as e:
         logging.error(f"[Error] Actualizando pares: {e}")
 
-# Ciclo principal de escaneo y operación
 async def ciclo_completo():
     global bot_encendido, operaciones_activas
     await asyncio.sleep(10)
@@ -165,12 +160,10 @@ async def ciclo_completo():
             if len(operaciones_activas) >= max_operaciones:
                 await asyncio.sleep(10)
                 continue
-
             saldo = await obtener_saldo_disponible()
             if saldo < min_orden_usdt:
                 await asyncio.sleep(15)
                 continue
-
             await actualizar_pares_rentables()
             mejores = []
             for _ in range(6):
@@ -180,27 +173,22 @@ async def ciclo_completo():
                 ]
                 mejores.extend([r for r in resultados if r["puntaje"] >= 3])
                 await asyncio.sleep(1)
-
             if not mejores:
                 logging.info("[Análisis] No se encontraron oportunidades.")
                 await asyncio.sleep(10)
                 continue
-
             mejores = sorted(mejores, key=lambda x: x["volumen"] * x["puntaje"], reverse=True)
             disponibles = [
                 m for m in mejores
                 if m["par"] not in ultimos_pares_operados or
                 (datetime.now() - ultimos_pares_operados[m["par"]]).total_seconds() >= tiempo_espera_reentrada
             ]
-
             for analisis in disponibles:
                 if analisis["par"] not in [op["par"] for op in operaciones_activas]:
                     await ejecutar_compra(analisis)
                     break
-
         await asyncio.sleep(5)
 
-# Ejecutar compra
 async def ejecutar_compra(analisis):
     global operaciones_activas
     saldo = await obtener_saldo_disponible()
@@ -228,7 +216,6 @@ async def ejecutar_compra(analisis):
     except Exception as e:
         logging.error(f"[Error] Compra en {analisis['par']}: {e}")
 
-# Monitorear operación
 async def monitorear_salida(operacion):
     global operaciones_activas, historial_operaciones
     entrada, cantidad, par = operacion["entrada"], operacion["cantidad"], operacion["par"]
@@ -265,7 +252,6 @@ async def monitorear_salida(operacion):
             logging.error(f"[Error] Monitoreando {par}: {e}")
         await asyncio.sleep(4)
 
-# Resumen diario automático
 async def resumen_diario_y_reset():
     global operaciones_activas, historial_operaciones, bot_encendido
     while True:
@@ -308,7 +294,6 @@ async def resumen_diario_y_reset():
         await actualizar_pares_rentables()
         bot_encendido = True
 
-# Arranque del bot
 async def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
     asyncio.create_task(resumen_diario_y_reset())
