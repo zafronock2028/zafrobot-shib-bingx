@@ -1,8 +1,8 @@
 import os
 import logging
 import asyncio
-from datetime import datetime, timedelta
-from decimal import Decimal, ROUND_DOWN
+from datetime import datetime
+from decimal import Decimal
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.filters import Command
@@ -11,14 +11,17 @@ from dotenv import load_dotenv
 
 # ------------------------- CONFIGURACIÓN INICIAL -------------------------
 load_dotenv()
+
+# Configuración de logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler('bot.log')
+        logging.FileHandler('trading_bot.log')
     ]
 )
+logger = logging.getLogger(__name__)
 
 # ------------------------- VARIABLES DE ENTORNO -------------------------
 API_KEY = os.getenv("API_KEY")
@@ -34,17 +37,10 @@ try:
     user = User(key=API_KEY, secret=SECRET_KEY, passphrase=API_PASSPHRASE)
     bot = Bot(token=TELEGRAM_TOKEN, parse_mode="Markdown")
     dp = Dispatcher()
-    logging.info("Clientes inicializados correctamente")
+    logger.info("Clientes inicializados correctamente")
 except Exception as e:
-    logging.error(f"Error inicializando clientes: {e}")
+    logger.error(f"Error inicializando clientes: {e}")
     raise
-
-# ------------------------- VARIABLES DE ESTADO -------------------------
-bot_activo = False
-operaciones = []
-historial = []
-ultimos_pares = {}
-lock = asyncio.Lock()
 
 # ------------------------- CONFIGURACIÓN DEL TRADING -------------------------
 PARES_ACTIVOS = [
@@ -58,7 +54,7 @@ CONFIG = {
     'espera_reentrada': 600,
     'ganancia_objetivo': 0.004,
     'stop_loss': -0.007,
-    'orden_minima': 15,  # Mínimo 15 USDT para cualquier operación
+    'orden_minima': 15,
     'min_order_usd': {
         "TRUMP-USDT": 15,
         "PEPE-USDT": 5,
@@ -73,7 +69,14 @@ CONFIG = {
     }
 }
 
-# ------------------------- TECLADO DE TELEGRAM -------------------------
+# ------------------------- ESTADO GLOBAL -------------------------
+bot_activo = False
+operaciones = []
+historial = []
+ultimos_pares = {}
+lock = asyncio.Lock()
+
+# ------------------------- FUNCIONES AUXILIARES -------------------------
 def crear_teclado():
     return ReplyKeyboardMarkup(
         keyboard=[
@@ -87,6 +90,18 @@ def crear_teclado():
         resize_keyboard=True
     )
 
+async def obtener_saldo_disponible():
+    try:
+        cuentas = user.get_account_list()
+        cuenta_usdt = next(
+            (c for c in cuentas if c['currency'] == 'USDT' and c['type'] == 'trade'),
+            None
+        )
+        return float(cuenta_usdt['balance']) if cuenta_usdt else 0.0
+    except Exception as e:
+        logger.error(f"Error obteniendo saldo: {e}")
+        return 0.0
+
 # ------------------------- HANDLERS DE TELEGRAM -------------------------
 @dp.message(Command("start"))
 async def comando_inicio(message: types.Message):
@@ -96,27 +111,27 @@ async def comando_inicio(message: types.Message):
 async def manejar_comandos(message: types.Message):
     global bot_activo
     
-    texto = message.text
-    if texto == "🚀 Encender Bot" and not bot_activo:
+    if message.text == "🚀 Encender Bot" and not bot_activo:
         bot_activo = True
-        asyncio.create_task(ejecutar_ciclo())
+        asyncio.create_task(ejecutar_ciclo_trading())
         await message.answer("✅ Bot activado")
-    elif texto == "⛔ Apagar Bot":
+    elif message.text == "⛔ Apagar Bot":
         bot_activo = False
         await message.answer("🔴 Bot detenido")
-    elif texto == "💰 Saldo":
+    elif message.text == "💰 Saldo":
         saldo = await obtener_saldo_disponible()
         await message.answer(f"💵 Saldo disponible: {saldo:.2f} USDT")
-    elif texto == "📊 Estado":
+    elif message.text == "📊 Estado":
         estado = "🟢 ACTIVO" if bot_activo else "🔴 INACTIVO"
         await message.answer(f"Estado del bot: {estado}")
-    elif texto == "📈 Operaciones":
+    elif message.text == "📈 Operaciones":
         await mostrar_operaciones_activas(message)
-    elif texto == "🧾 Historial":
+    elif message.text == "🧾 Historial":
         await mostrar_historial(message)
 
-# ------------------------- LÓGICA PRINCIPAL DEL TRADING -------------------------
-async def ejecutar_ciclo():
+# ------------------------- LÓGICA DE TRADING -------------------------
+async def ejecutar_ciclo_trading():
+    logger.info("Iniciando ciclo de trading")
     while bot_activo:
         try:
             async with lock:
@@ -148,12 +163,10 @@ async def ejecutar_ciclo():
                             await ejecutar_compra(par, señal['precio'], monto_por_operacion)
                             await asyncio.sleep(2)
                             break
-                        else:
-                            logging.info(f"Monto insuficiente para {par}. Se necesitan ${min_order:.2f}")
             
             await asyncio.sleep(1)
         except Exception as e:
-            logging.error(f"Error en ciclo principal: {e}")
+            logger.error(f"Error en ciclo de trading: {e}")
             await asyncio.sleep(5)
 
 async def analizar_par(par):
@@ -169,11 +182,11 @@ async def analizar_par(par):
         cambio = (precios[-1] - precios[-2]) / precios[-2]
         
         if (cambio > 0.001 and desviacion < 0.02 and volumen > 500000):
-            logging.info(f"Señal válida en {par} | Precio: {ultimo:.8f}")
+            logger.info(f"Señal válida en {par} | Precio: {ultimo:.8f}")
             return {'par': par, 'precio': ultimo, 'valido': True}
             
     except Exception as e:
-        logging.error(f"Error analizando {par}: {e}")
+        logger.error(f"Error analizando {par}: {e}")
     
     return {'par': par, 'valido': False}
 
@@ -195,10 +208,12 @@ async def ejecutar_compra(par, precio, monto):
         if cantidad_corr < Decimal(str(min_order_size)):
             raise ValueError(f"Cantidad mínima no alcanzada. Mínimo {min_order_size} {par.split('-')[0]}")
         
+        # CORRECCIÓN: Paréntesis correctamente cerrados en create_market_order
         orden = trade.create_market_order(
             symbol=par,
             side='buy',
             size=str(float(cantidad_corr))
+        )
         
         nueva_operacion = {
             'par': par,
@@ -209,7 +224,7 @@ async def ejecutar_compra(par, precio, monto):
         }
         
         operaciones.append(nueva_operacion)
-        logging.info(f"Compra ejecutada: {par} {float(cantidad_corr):.8f} @ {precio:.8f}")
+        logger.info(f"Compra ejecutada: {par} {float(cantidad_corr):.8f} @ {precio:.8f}")
         await bot.send_message(
             TELEGRAM_CHAT_ID,
             f"🟢 COMPRA: {par}\n"
@@ -221,7 +236,7 @@ async def ejecutar_compra(par, precio, monto):
         asyncio.create_task(monitorear_operacion(nueva_operacion))
         
     except Exception as e:
-        logging.error(f"Error en compra {par}: {str(e)}")
+        logger.error(f"Error en compra {par}: {str(e)}")
         await bot.send_message(
             TELEGRAM_CHAT_ID,
             f"❌ Error en compra {par}:\n{str(e)}"
@@ -250,7 +265,7 @@ async def monitorear_operacion(op):
                 
             await asyncio.sleep(3)
         except Exception as e:
-            logging.error(f"Error monitoreando {op['par']}: {e}")
+            logger.error(f"Error monitoreando {op['par']}: {e}")
             await asyncio.sleep(5)
 
 async def ejecutar_venta(op):
@@ -276,7 +291,7 @@ async def ejecutar_venta(op):
         operaciones.remove(op)
         ultimos_pares[op['par']] = datetime.now()
         
-        logging.info(f"Venta ejecutada: {op['par']} Ganancia: {ganancia:.4f}")
+        logger.info(f"Venta ejecutada: {op['par']} Ganancia: {ganancia:.4f}")
         await bot.send_message(
             TELEGRAM_CHAT_ID,
             f"🔴 VENTA: {op['par']}\n"
@@ -286,23 +301,11 @@ async def ejecutar_venta(op):
         )
         
     except Exception as e:
-        logging.error(f"Error en venta {op['par']}: {e}")
+        logger.error(f"Error en venta {op['par']}: {e}")
         await bot.send_message(
             TELEGRAM_CHAT_ID,
             f"❌ Error en venta {op['par']}:\n{str(e)}"
         )
-
-async def obtener_saldo_disponible():
-    try:
-        cuentas = user.get_account_list()
-        cuenta_usdt = next(
-            (c for c in cuentas if c['currency'] == 'USDT' and c['type'] == 'trade'),
-            None
-        )
-        return float(cuenta_usdt['balance']) if cuenta_usdt else 0.0
-    except Exception as e:
-        logging.error(f"Error obteniendo saldo: {e}")
-        return 0.0
 
 async def mostrar_operaciones_activas(message: types.Message):
     if not operaciones:
@@ -341,6 +344,8 @@ async def mostrar_historial(message: types.Message):
     await message.answer(mensaje)
 
 async def iniciar_bot():
+    from keep_alive import mantener_activo
+    mantener_activo()
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
