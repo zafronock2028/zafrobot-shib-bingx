@@ -144,7 +144,8 @@ async def ejecutar_compra(par, precio, monto):
             symbol=par,
             side='buy',
             size=str(float(cantidad_corr))
-        
+        )
+
         nueva_operacion = {
             'par': par,
             'entrada': float(precio),
