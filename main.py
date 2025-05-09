@@ -20,9 +20,9 @@ CHAT_ID = os.getenv("CHAT_ID")
 
 bot = Bot(token=TOKEN, parse_mode="Markdown")
 dp = Dispatcher()
-market = Market()
-trade = Trade(key=API_KEY, secret=SECRET_KEY, passphrase=API_PASS)
-user = User(API_KEY, SECRET_KEY, API_PASS)
+market = Market(url='https://api.kucoin.com')
+trade = Trade(key=API_KEY, secret=SECRET_KEY, passphrase=API_PASS, url='https://api.kucoin.com')
+user = User(API_KEY, SECRET_KEY, API_PASS, url='https://api.kucoin.com')
 
 # Variables de control
 bot_activo = False
