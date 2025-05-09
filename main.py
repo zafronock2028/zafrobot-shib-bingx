@@ -7,9 +7,17 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.filters import Command
 from kucoin.client import Market, Trade, User
+from dotenv import load_dotenv
+
+# Cargar variables de entorno
+load_dotenv()
 
 # Configurar logs
-logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(message)s')
+logging.basicConfig(
+    level=logging.INFO,
+    format='[%(asctime)s] %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
 
 # Variables de entorno
 API_KEY = os.getenv("API_KEY")
@@ -18,11 +26,13 @@ API_PASS = os.getenv("API_PASSPHRASE")
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
+# Inicialización de clientes KuCoin (versión 2.2.0)
+market = Market(api_key=API_KEY, api_secret=SECRET_KEY, api_passphrase=API_PASS)
+trade = Trade(api_key=API_KEY, api_secret=SECRET_KEY, api_passphrase=API_PASS, is_sandbox=False)
+user = User(api_key=API_KEY, api_secret=SECRET_KEY, api_passphrase=API_PASS)
+
 bot = Bot(token=TOKEN, parse_mode="Markdown")
 dp = Dispatcher()
-market = Market(url='https://api.kucoin.com')
-trade = Trade(key=API_KEY, secret=SECRET_KEY, passphrase=API_PASS, url='https://api.kucoin.com')
-user = User(API_KEY, SECRET_KEY, API_PASS, url='https://api.kucoin.com')
 
 # Variables de control
 bot_activo = False
@@ -196,7 +206,7 @@ async def monitorear(op):
             max_precio = max(max_precio, actual)
             variacion = (actual - entrada) / entrada
             ganancia_bruta = (actual - entrada) * cantidad
-            comision_aprox = entrada * cantidad * 0.002  # entrada + salida
+            comision_aprox = entrada * cantidad * 0.002
             ganancia_neta = ganancia_bruta - comision_aprox
             op.update({"actual": actual, "ganancia": ganancia_neta})
 
