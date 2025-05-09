@@ -1,3 +1,4 @@
 aiogram==3.4.1
-python-kucoin==1.0.1
+python-kucoin==2.2.0
 flask==3.0.2
+python-dotenv==1.0.0
