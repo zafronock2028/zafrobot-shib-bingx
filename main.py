@@ -12,7 +12,6 @@ from dotenv import load_dotenv
 # ------------------------- CONFIGURACIÓN INICIAL -------------------------
 load_dotenv()
 
-# Configuración de logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -102,46 +101,35 @@ async def obtener_saldo_disponible():
         logger.error(f"Error obteniendo saldo: {e}")
         return 0.0
 
-# ------------------------- FUNCIONES DE ANÁLISIS (ESCANEO) -------------------------
+# ------------------------- FUNCIONES DE TRADING -------------------------
 async def analizar_par(par):
-    """Escanea el mercado y devuelve señales válidas"""
     try:
-        # 1. Obtener datos del mercado
         velas = market.get_kline(symbol=par, kline_type="1min", limit=5)
-        precios = [float(v[2]) for v in velas]  # Precios de cierre
+        precios = [float(v[2]) for v in velas]
         ultimo = precios[-1]
-        
-        # 2. Calcular indicadores técnicos
         media = sum(precios) / len(precios)
         desviacion = abs(ultimo - media) / media
         
-        # 3. Verificar condiciones de volumen
         stats = market.get_24h_stats(symbol=par)
         volumen = float(stats['volValue'])
         
-        # 4. Aplicar filtros (SOLO si pasa todas las condiciones)
-        if (desviacion < 0.02 and         # Baja volatilidad
-            volumen > 500000 and          # Volumen mínimo
-            (ultimo > precios[-2])):      # Tendencia alcista
-            logger.info(f"✅ Señal válida en {par} (Precio: {ultimo:.8f}, Volumen: {volumen:,.2f})")
+        if (desviacion < 0.02 and volumen > 500000 and ultimo > precios[-2]):
+            logger.info(f"✅ Señal válida en {par} (Precio: {ultimo:.8f})")
             return {'par': par, 'precio': ultimo, 'valido': True}
             
     except Exception as e:
-        logger.error(f"Error escaneando {par}: {e}")
+        logger.error(f"Error analizando {par}: {e}")
     
     return {'par': par, 'valido': False}
 
-# ------------------------- FUNCIONES DE EJECUCIÓN -------------------------
 async def ejecutar_compra(par, precio, monto):
-    """Ejecuta una orden de compra si el análisis es favorable"""
     try:
-        # 1. Verificar requisitos mínimos
         symbol_info = market.get_symbol_list()
         current_symbol = next((s for s in symbol_info if s['symbol'] == par), None)
+        
         if not current_symbol:
             raise ValueError(f"Par {par} no encontrado")
         
-        # 2. Calcular cantidad a comprar
         base_increment = float(current_symbol['baseIncrement'])
         min_order_size = float(current_symbol['baseMinSize'])
         cantidad = Decimal(str(monto)) / Decimal(str(precio))
@@ -150,13 +138,13 @@ async def ejecutar_compra(par, precio, monto):
         if cantidad_corr < Decimal(str(min_order_size)):
             raise ValueError(f"Mínimo no alcanzado: {min_order_size} {par.split('-')[0]}")
         
-        # 3. Crear orden de compra
+        # CORRECCIÓN: Paréntesis correctamente cerrados
         orden = trade.create_market_order(
             symbol=par,
             side='buy',
             size=str(float(cantidad_corr))
+        )  # ← Este paréntesis estaba faltando
         
-        # 4. Registrar operación
         nueva_operacion = {
             'par': par,
             'entrada': float(precio),
@@ -175,7 +163,6 @@ async def ejecutar_compra(par, precio, monto):
             f"Inversión: ${monto:.2f} USD"
         )
         
-        # 5. Iniciar monitoreo
         asyncio.create_task(monitorear_operacion(nueva_operacion))
         
     except Exception as e:
@@ -183,21 +170,16 @@ async def ejecutar_compra(par, precio, monto):
         await bot.send_message(TELEGRAM_CHAT_ID, f"Error en compra {par}:\n{str(e)}")
 
 async def monitorear_operacion(op):
-    """Monitorea una operación activa y ejecuta venta cuando sea necesario"""
     while op in operaciones and bot_activo:
         try:
-            # 1. Obtener precio actual
             ticker = market.get_ticker(symbol=op['par'])
             precio_actual = float(ticker['price'])
             
-            # 2. Actualizar máximo y ganancias
             if precio_actual > op['maximo']:
                 op['maximo'] = precio_actual
             
-            ganancia = (precio_actual - op['entrada']) * op['cantidad']
             ganancia_porcentaje = (precio_actual - op['entrada']) / op['entrada']
             
-            # 3. Verificar condiciones de venta
             if (ganancia_porcentaje >= CONFIG['ganancia_objetivo'] or 
                 (precio_actual - op['maximo']) / op['maximo'] <= CONFIG['stop_loss']):
                 await ejecutar_venta(op)
@@ -209,18 +191,18 @@ async def monitorear_operacion(op):
             await asyncio.sleep(5)
 
 async def ejecutar_venta(op):
-    """Ejecuta una orden de venta"""
     try:
+        # CORRECCIÓN: Paréntesis cerrados correctamente
         orden = trade.create_market_order(
             symbol=op['par'],
             side='sell',
-            size=str(op['cantidad']))
+            size=str(op['cantidad'])
+        )  # ← Este paréntesis estaba faltando
         
-        ganancia = op['ganancia']
+        ganancia = (op['maximo'] - op['entrada']) * op['cantidad']
         resultado = "GANANCIA" if ganancia > 0 else "PÉRDIDA"
         porcentaje = ((op['maximo'] - op['entrada']) / op['entrada']) * 100
         
-        # Registrar en historial
         historial.append({
             'fecha': datetime.now().strftime("%Y-%m-%d %H:%M"),
             'par': op['par'],
@@ -229,7 +211,6 @@ async def ejecutar_venta(op):
             'porcentaje': porcentaje
         })
         
-        # Actualizar estado
         operaciones.remove(op)
         ultimos_pares[op['par']] = datetime.now()
         
@@ -248,46 +229,38 @@ async def ejecutar_venta(op):
 
 # ------------------------- LÓGICA PRINCIPAL -------------------------
 async def ejecutar_ciclo_trading():
-    """Ciclo principal de trading (escaneo → análisis → ejecución)"""
     logger.info("🚀 Iniciando ciclo de trading")
     while bot_activo:
         try:
             async with lock:
-                # 1. Verificar límite de operaciones
                 if len(operaciones) >= CONFIG['max_operaciones']:
                     await asyncio.sleep(10)
                     continue
                 
-                # 2. Calcular monto disponible
                 saldo = await obtener_saldo_disponible()
                 monto_por_operacion = (saldo * CONFIG['uso_saldo']) / CONFIG['max_operaciones']
+                
                 if monto_por_operacion < CONFIG['orden_minima']:
                     await asyncio.sleep(30)
                     continue
                 
-                # 3. Escanear cada par
                 for par in PARES_ACTIVOS:
                     if not bot_activo:
                         break
                     
-                    # 4. Verificar si ya estamos en este par
                     if any(op['par'] == par for op in operaciones):
                         continue
                         
-                    # 5. Verificar tiempo de espera para reentrada
                     if par in ultimos_pares and (datetime.now() - ultimos_pares[par]).seconds < CONFIG['espera_reentrada']:
                         continue
                     
-                    # 6. ANALIZAR el par (esto va ANTES de comprar)
                     señal = await analizar_par(par)
-                    
-                    # 7. SOLO si hay señal válida, ejecutar compra
                     if señal['valido'] and monto_por_operacion >= CONFIG['min_order_usd'].get(par, 15):
                         await ejecutar_compra(par, señal['precio'], monto_por_operacion)
-                        await asyncio.sleep(5)  # Esperar entre operaciones
+                        await asyncio.sleep(5)
                         break
             
-            await asyncio.sleep(3)  # Esperar entre ciclos de escaneo
+            await asyncio.sleep(3)
             
         except Exception as e:
             logger.error(f"Error en ciclo principal: {e}")
