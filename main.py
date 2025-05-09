@@ -6,7 +6,7 @@ from decimal import Decimal, ROUND_DOWN
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.filters import Command
-from kucoin.client import Market, Trade, User
+from kucoin.client import Client as KuCoinClient
 from dotenv import load_dotenv
 
 # Cargar variables de entorno
@@ -26,10 +26,13 @@ API_PASS = os.getenv("API_PASSPHRASE")
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
-# Inicialización de clientes KuCoin (versión 2.2.0)
-market = Market(api_key=API_KEY, api_secret=SECRET_KEY, api_passphrase=API_PASS)
-trade = Trade(api_key=API_KEY, api_secret=SECRET_KEY, api_passphrase=API_PASS, is_sandbox=False)
-user = User(api_key=API_KEY, api_secret=SECRET_KEY, api_passphrase=API_PASS)
+# Inicialización del cliente KuCoin
+kucoin_client = KuCoinClient(
+    api_key=API_KEY,
+    api_secret=SECRET_KEY,
+    api_passphrase=API_PASS,
+    is_sandbox=False
+)
 
 bot = Bot(token=TOKEN, parse_mode="Markdown")
 dp = Dispatcher()
@@ -124,7 +127,7 @@ async def comandos(message: types.Message):
 
 async def saldo_disponible():
     try:
-        cuentas = user.get_account_list()
+        cuentas = kucoin_client.get_account_list()
         return next((float(x["available"]) for x in cuentas if x["currency"] == "USDT"), 0.0)
     except Exception as e:
         logging.error(f"[Saldo] Error: {e}")
@@ -138,12 +141,13 @@ def corregir_cantidad(usdt, precio, par):
 
 def analizar(par):
     try:
-        velas = market.get_kline(symbol=par, kline_type="1min", limit=5)
+        velas = kucoin_client.get_kline(symbol=par, kline_type="1min", limit=5)
         precios = [float(x[2]) for x in velas]
         ultimo = precios[-1]
         promedio = sum(precios) / len(precios)
         spread = abs(ultimo - promedio) / promedio
-        volumen = float(market.get_24h_stats(par)["volValue"])
+        stats = kucoin_client.get_24h_stats(symbol=par)
+        volumen = float(stats["volValue"])
         impulso = (precios[-1] - precios[-2]) / precios[-2]
         if impulso > 0.001 and spread < 0.02 and volumen > 500000:
             logging.info(f"[Análisis] {par} | Precio: {ultimo:.6f} | Volumen: {volumen:.0f} | Impulso: {impulso:.4f}")
@@ -176,7 +180,7 @@ async def ciclo():
 
                 cantidad = corregir_cantidad(monto, analisis["precio"], par)
                 try:
-                    trade.create_market_order(symbol=par, side="buy", size=cantidad)
+                    kucoin_client.create_market_order(symbol=par, side="buy", size=cantidad)
                     op = {
                         "par": par,
                         "entrada": analisis["precio"],
@@ -202,7 +206,8 @@ async def monitorear(op):
 
     while True:
         try:
-            actual = float(market.get_ticker(par)["price"])
+            ticker = kucoin_client.get_ticker(symbol=par)
+            actual = float(ticker["price"])
             max_precio = max(max_precio, actual)
             variacion = (actual - entrada) / entrada
             ganancia_bruta = (actual - entrada) * cantidad
@@ -211,7 +216,7 @@ async def monitorear(op):
             op.update({"actual": actual, "ganancia": ganancia_neta})
 
             if variacion >= ganancia_obj or ((actual - max_precio) / max_precio) <= trailing_stop:
-                trade.create_market_order(symbol=par, side="sell", size=str(cantidad))
+                kucoin_client.create_market_order(symbol=par, side="sell", size=str(cantidad))
                 operaciones.remove(op)
                 ultimos_pares[par] = datetime.now()
                 resultado = "✅ GANADA" if ganancia_neta > 0 else "❌ PERDIDA"
