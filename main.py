@@ -1,7 +1,7 @@
-# main.py actualizado y corregido
 import os
 import logging
 import asyncio
+from datetime import datetime, timedelta
 from decimal import Decimal
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
@@ -9,13 +9,19 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from kucoin.client import Trade, Market, User
 from dotenv import load_dotenv
 
+# ---------------------- CONFIG INICIAL ----------------------
 load_dotenv()
 
-# Configuración de logs
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler("scalper.log")
+    ]
+)
 logger = logging.getLogger("ZafroBot")
 
-# Autenticación
 API_KEY = os.getenv("API_KEY")
 SECRET_KEY = os.getenv("SECRET_KEY")
 API_PASSPHRASE = os.getenv("API_PASSPHRASE")
@@ -37,31 +43,20 @@ PARES = [
 CONFIG = {
     "uso_saldo": 0.80,
     "max_operaciones": 3,
-    "puntaje_minimo": 2.5,
     "reanalisis_segundos": 8,
-    "min_sizes": {
-        "SHIB-USDT": (100000.0, 1000.0),
-        "PEPE-USDT": (10000.0, 1000.0),
-        "FLOKI-USDT": (1000.0, 100.0),
-        "DOGE-USDT": (1.0, 0.1),
-        "TRUMP-USDT": (1.0, 0.1),
-        "SUI-USDT": (0.1, 0.01),
-        "TURBO-USDT": (100.0, 10.0),
-        "BONK-USDT": (10000.0, 1000.0),
-        "KAS-USDT": (0.1, 0.01),
-        "WIF-USDT": (1.0, 0.1),
-        "ADA-USDT": (1.0, 0.1),
-        "AVAX-USDT": (0.1, 0.01),
-        "XRP-USDT": (1.0, 0.1),
-        "MATIC-USDT": (1.0, 0.1),
-        "OP-USDT": (1.0, 0.1)
-    }
+    "cooldown_por_par": 1800,
+    "min_hold_time": 60,
+    "breakout_timeout": 240
 }
 
-operaciones_activas = []
 bot_activo = False
+operaciones_activas = []
+historial_operaciones = []
+ultimos_usos = {}
 lock = asyncio.Lock()
+tiempo_activacion = None
 
+# ---------------------- FUNCIONES AUXILIARES ----------------------
 async def obtener_saldo():
     try:
         cuentas = user.get_account_list()
@@ -71,90 +66,109 @@ async def obtener_saldo():
         logger.error(f"Error obteniendo saldo: {e}")
         return 0.0
 
-async def analizar_impulso(par):
+async def analizar_par(par):
     try:
         velas = market.get_kline(symbol=par, kline_type="1min", limit=4)
         precios = [float(v[2]) for v in velas]
         volumen = float(market.get_24h_stats(par)["volValue"])
         spread = abs(precios[-1] - precios[0]) / precios[0]
-        velas_positivas = sum(1 for i in range(1, len(precios)) if precios[i] > precios[i - 1])
-        impulso = (velas_positivas / 3)
+        velas_verdes = sum(1 for i in range(1, len(precios)) if precios[i] > precios[i-1])
+        impulso = velas_verdes / 3
         momentum = (precios[-1] - precios[-2]) / precios[-2]
         puntaje = impulso + momentum + (volumen / 1_000_000) + (spread * 10)
-
-        logger.info(f"[{par}] Score: {puntaje:.2f} | Impulso: {impulso:.2f} | Spread: {spread:.4f} | Volumen: {volumen:.0f}")
+        logger.info(f"[{par}] Score: {puntaje:.2f} | Impulso: {impulso:.2f} | Volumen: {volumen:.0f} | Spread: {spread:.4f}")
         return {"par": par, "precio": precios[-1], "puntaje": puntaje}
     except Exception as e:
         logger.error(f"Error analizando {par}: {e}")
         return None
 
-async def ejecutar_compra(par, precio, monto_usdt):
+async def ejecutar_compra(par, precio, monto):
     try:
-        min_size, increment = CONFIG["min_sizes"].get(par, (0, 0))
-        size = Decimal(monto_usdt) / Decimal(precio)
-        size = (size // Decimal(increment)) * Decimal(increment)
+        symbol_info = market.get_symbol_list()
+        current = next(s for s in symbol_info if s["symbol"] == par)
+        base_increment = float(current["baseIncrement"])
+        min_size = float(current["baseMinSize"])
+        size = Decimal(monto) / Decimal(precio)
+        size = (size // Decimal(base_increment)) * Decimal(base_increment)
         if size < Decimal(min_size):
-            raise Exception(f"Tamaño mínimo no alcanzado: {min_size} {par.split('-')[0]}")
-
+            raise Exception(f"Size menor al mínimo permitido: {min_size}")
         trade.create_market_order(par, "buy", size=str(size))
         logger.info(f"COMPRA {par} {size:.4f} @ {precio:.4f}")
-        await bot.send_message(CHAT_ID, f"🟢 COMPRA: {par}\nPrecio: {precio:.4f}\nMonto: {monto_usdt:.2f} USDT")
-
+        await bot.send_message(CHAT_ID, f"🟢 COMPRA: {par}\nPrecio: {precio:.4f}\nMonto: {monto:.2f} USDT")
         op = {
             "par": par,
             "entrada": float(precio),
             "cantidad": float(size),
             "maximo": float(precio),
-            "timestamp": asyncio.get_event_loop().time()
+            "inicio": datetime.utcnow()
         }
         operaciones_activas.append(op)
+        ultimos_usos[par] = datetime.utcnow()
         asyncio.create_task(trailing_stop(op))
     except Exception as e:
-        logger.error(f"Error en compra {par}: {e}")
-        await bot.send_message(CHAT_ID, f"❌ ERROR en compra {par}:\n{e}")
+        logger.error(f"Error en compra: {e}")
+        await bot.send_message(CHAT_ID, f"❌ Error al comprar {par}:\n{e}")
 
 async def trailing_stop(op):
     while bot_activo and op in operaciones_activas:
         try:
-            precio_actual = float(market.get_ticker(op["par"])["price"])
+            await asyncio.sleep(3)
+            ticker = market.get_ticker(op["par"])
+            precio_actual = float(ticker["price"])
             if precio_actual > op["maximo"]:
                 op["maximo"] = precio_actual
 
+            tiempo_en_op = (datetime.utcnow() - op["inicio"]).total_seconds()
             ganancia_pct = (precio_actual - op["entrada"]) / op["entrada"]
-            retroceso_pct = (precio_actual - op["maximo"]) / op["maximo"]
-            tiempo_activa = asyncio.get_event_loop().time() - op["timestamp"]
+            retroceso = (precio_actual - op["maximo"]) / op["maximo"]
 
-            if tiempo_activa >= 240 and ganancia_pct < 0.0035:
-                await ejecutar_venta(op, precio_actual)
+            if tiempo_en_op >= CONFIG["breakout_timeout"] and ganancia_pct < 0.0035:
+                await ejecutar_venta(op, precio_actual, forzado=True)
                 break
 
-            condiciones = [
-                (0.018, -0.01), (0.012, -0.006), (0.009, -0.004),
-                (0.006, -0.0025), (0.0035, -0.0015)
-            ]
-            for g_min, r_max in condiciones:
-                if ganancia_pct >= g_min and retroceso_pct <= r_max:
-                    if tiempo_activa >= 60:
-                        await ejecutar_venta(op, precio_actual)
-                        break
-            await asyncio.sleep(3)
-        except Exception as e:
-            logger.error(f"Error en trailing stop de {op['par']}: {e}")
-            await asyncio.sleep(5)
+            if tiempo_en_op < CONFIG["min_hold_time"]:
+                continue
 
-async def ejecutar_venta(op, precio_venta):
+            escalas = [
+                (0.018, -0.010),
+                (0.012, -0.006),
+                (0.009, -0.004),
+                (0.006, -0.0025),
+                (0.0035, -0.0015),
+            ]
+            for g, r in escalas:
+                if ganancia_pct >= g and retroceso <= r:
+                    await ejecutar_venta(op, precio_actual)
+                    return
+
+        except Exception as e:
+            logger.error(f"Error en trailing de {op['par']}: {e}")
+
+async def ejecutar_venta(op, precio_venta, forzado=False):
     try:
         trade.create_market_order(op["par"], "sell", size=str(op["cantidad"]))
         ganancia = (precio_venta - op["entrada"]) * op["cantidad"]
-        porcentaje = ((precio_venta - op["entrada"]) / op["entrada"]) * 100
-        logger.info(f"VENTA {op['par']} @ {precio_venta:.4f} | GANANCIA: {ganancia:.4f} USD")
-        await bot.send_message(CHAT_ID, f"🔴 VENTA: {op['par']}\nPrecio: {precio_venta:.4f}\nGanancia: {ganancia:.4f} USD\nRentabilidad: {porcentaje:.2f}%")
+        pct = ((precio_venta - op["entrada"]) / op["entrada"]) * 100
         operaciones_activas.remove(op)
+        historial_operaciones.append({
+            "fecha": datetime.utcnow().strftime("%Y-%m-%d %H:%M"),
+            "par": op["par"],
+            "ganancia": ganancia,
+            "porcentaje": pct,
+            "tipo": "Forzada" if forzado else "Normal"
+        })
+        logger.info(f"VENTA {op['par']} @ {precio_venta:.4f} | G: {ganancia:.4f} USD ({pct:.2f}%)")
+        await bot.send_message(CHAT_ID, f"🔴 VENTA {op['par']} ({'⏱️' if forzado else '✅'})\n"
+                                         f"Salida: {precio_venta:.4f}\n"
+                                         f"Ganancia: {ganancia:.4f} USD\nRentabilidad: {pct:.2f}%")
     except Exception as e:
-        logger.error(f"Error al vender {op['par']}: {e}")
-        await bot.send_message(CHAT_ID, f"❌ ERROR al vender {op['par']}:\n{e}")
+        logger.error(f"Error al vender: {e}")
 
 async def ciclo_trading():
+    global tiempo_activacion
+    tiempo_activacion = datetime.utcnow()
+    await bot.send_message(CHAT_ID, "⏳ Analizando el mercado antes de operar...")
+    await asyncio.sleep(60)
     while bot_activo:
         try:
             async with lock:
@@ -162,17 +176,20 @@ async def ciclo_trading():
                     await asyncio.sleep(CONFIG["reanalisis_segundos"])
                     continue
                 saldo = await obtener_saldo()
-                if saldo <= 0:
-                    logger.warning("Saldo insuficiente")
+                if saldo <= 5:
+                    logger.warning("Saldo muy bajo")
                     await asyncio.sleep(10)
                     continue
                 monto = (saldo * CONFIG["uso_saldo"]) / CONFIG["max_operaciones"]
-                logger.info(f"Saldo: {saldo:.2f} USDT | Monto por operación: {monto:.2f}")
                 for par in PARES:
-                    if not bot_activo or any(op["par"] == par for op in operaciones_activas):
+                    if any(op["par"] == par for op in operaciones_activas):
                         continue
-                    analisis = await analizar_impulso(par)
-                    if analisis and analisis["puntaje"] >= CONFIG["puntaje_minimo"]:
+                    if par in ultimos_usos:
+                        delta = (datetime.utcnow() - ultimos_usos[par]).total_seconds()
+                        if delta < CONFIG["cooldown_por_par"]:
+                            continue
+                    analisis = await analizar_par(par)
+                    if analisis and analisis["puntaje"] >= 2.5:
                         await ejecutar_compra(par, analisis["precio"], monto)
                         await asyncio.sleep(3)
                         break
@@ -181,13 +198,13 @@ async def ciclo_trading():
             logger.error(f"Error en ciclo: {e}")
             await asyncio.sleep(5)
 
+# ---------------- TELEGRAM ----------------
 def crear_teclado():
     return ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text="🚀 Encender Bot")],
         [KeyboardButton(text="⛔ Apagar Bot")],
-        [KeyboardButton(text="💰 Saldo")],
-        [KeyboardButton(text="📊 Estado Bot")],
-        [KeyboardButton(text="📈 Operaciones")]
+        [KeyboardButton(text="💰 Saldo"), KeyboardButton(text="📊 Estado Bot")],
+        [KeyboardButton(text="📈 Operaciones"), KeyboardButton(text="📜 Historial")]
     ], resize_keyboard=True)
 
 @dp.message(Command("start"))
@@ -212,21 +229,36 @@ async def comandos(msg: types.Message):
         await msg.answer(f"💵 Saldo disponible: {saldo:.2f} USDT")
     elif msg.text == "📊 Estado Bot":
         estado = "🟢 ACTIVO" if bot_activo else "🔴 INACTIVO"
-        await msg.answer(f"{estado} | Operaciones: {len(operaciones_activas)}")
+        await msg.answer(f"{estado} | Operaciones activas: {len(operaciones_activas)}")
     elif msg.text == "📈 Operaciones":
         if not operaciones_activas:
-            await msg.answer("Sin operaciones activas")
+            await msg.answer("No hay operaciones activas")
         else:
             texto = "📊 Operaciones activas:\n\n"
             for op in operaciones_activas:
-                texto += f"{op['par']}\nEntrada: {op['entrada']:.4f}\nMáximo: {op['maximo']:.4f}\nCantidad: {op['cantidad']:.4f}\n\n"
+                texto += (
+                    f"{op['par']}\nEntrada: {op['entrada']:.4f}\n"
+                    f"Máximo: {op['maximo']:.4f}\nCantidad: {op['cantidad']:.4f}\n\n"
+                )
+            await msg.answer(texto)
+    elif msg.text == "📜 Historial":
+        if not historial_operaciones:
+            await msg.answer("Sin operaciones cerradas aún.")
+        else:
+            texto = "📜 HISTORIAL DE OPERACIONES\n\n"
+            for op in historial_operaciones[-10:][::-1]:
+                texto += (
+                    f"⏰ {op['fecha']}\nPar: {op['par']}\n"
+                    f"Resultado: {'✅ Ganancia' if op['ganancia'] > 0 else '❌ Pérdida'}\n"
+                    f"{op['ganancia']:.2f} USDT ({op['porcentaje']:.2f}%)\n───────────────\n"
+                )
             await msg.answer(texto)
 
 async def iniciar_bot():
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    logger.info("ZafroBot Scalper Impulso Pro V2 iniciado")
+    logger.info("ZafroBot Scalper Profesional Iniciado")
     try:
         asyncio.run(iniciar_bot())
     except KeyboardInterrupt:
