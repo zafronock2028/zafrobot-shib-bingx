@@ -1,3 +1,4 @@
 #!/bin/bash
-python keep_alive.py &
-python main.py
+echo "🚀 Iniciando ZafroBot..."
+python keep_alive.py &  # Servidor keep-alive en segundo plano
+python main.py          # Bot principal
