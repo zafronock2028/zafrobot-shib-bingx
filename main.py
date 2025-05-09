@@ -22,7 +22,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger("ZafroBot")
 
-# Entorno
 API_KEY = os.getenv("API_KEY")
 SECRET_KEY = os.getenv("SECRET_KEY")
 API_PASSPHRASE = os.getenv("API_PASSPHRASE")
@@ -35,6 +34,7 @@ user = User(key=API_KEY, secret=SECRET_KEY, passphrase=API_PASSPHRASE)
 bot = Bot(token=TELEGRAM_TOKEN)
 dp = Dispatcher()
 
+# ---------------------- CONFIG DE PARES Y ESTRATEGIA ----------------------
 PARES = [
     "SHIB-USDT", "PEPE-USDT", "FLOKI-USDT", "DOGE-USDT", "TRUMP-USDT",
     "SUI-USDT", "TURBO-USDT", "BONK-USDT", "KAS-USDT", "WIF-USDT",
@@ -63,14 +63,16 @@ CONFIG = {
     "uso_saldo": 0.80,
     "max_operaciones": 3,
     "puntaje_minimo": 2.5,
-    "reanalisis_segundos": 8
+    "reanalisis_segundos": 8,
+    "cooldown_reentrada": 1800  # 30 minutos
 }
 
 operaciones_activas = []
+ultimos_pares = {}
 bot_activo = False
 lock = asyncio.Lock()
 
-# ---------------------- FUNCIONES BASE ----------------------
+# ---------------------- FUNCIONES ----------------------
 async def obtener_saldo():
     try:
         cuentas = user.get_account_list()
@@ -115,6 +117,7 @@ async def ejecutar_compra(par, precio, monto_usdt):
             "entrada_dt": datetime.now()
         }
         operaciones_activas.append(op)
+        ultimos_pares[par] = datetime.now()
         asyncio.create_task(trailing_stop(op))
     except Exception as e:
         logger.error(f"Error en compra {par}: {e}")
@@ -130,24 +133,21 @@ async def trailing_stop(op):
                 op["maximo"] = precio_actual
             ganancia_pct = (precio_actual - op["entrada"]) / op["entrada"]
             retroceso_pct = (precio_actual - op["maximo"]) / op["maximo"]
-            if ganancia_pct >= 0.018 and retroceso_pct <= -0.01:
-                await ejecutar_venta(op, precio_actual)
-                break
-            elif ganancia_pct >= 0.012 and retroceso_pct <= -0.006:
-                await ejecutar_venta(op, precio_actual)
-                break
-            elif ganancia_pct >= 0.009 and retroceso_pct <= -0.004:
-                await ejecutar_venta(op, precio_actual)
-                break
-            elif ganancia_pct >= 0.006 and retroceso_pct <= -0.0025:
-                await ejecutar_venta(op, precio_actual)
-                break
-            elif ganancia_pct >= 0.0035 and retroceso_pct <= -0.0015:
-                await ejecutar_venta(op, precio_actual)
-                break
+
+            if ganancia_pct >= 0.07 and retroceso_pct <= -0.015:
+                await ejecutar_venta(op, precio_actual); break
+            elif ganancia_pct >= 0.035 and retroceso_pct <= -0.01:
+                await ejecutar_venta(op, precio_actual); break
+            elif ganancia_pct >= 0.02 and retroceso_pct <= -0.006:
+                await ejecutar_venta(op, precio_actual); break
+            elif ganancia_pct >= 0.01 and retroceso_pct <= -0.0035:
+                await ejecutar_venta(op, precio_actual); break
+            elif ganancia_pct >= 0.005 and retroceso_pct <= -0.002:
+                await ejecutar_venta(op, precio_actual); break
+
             if datetime.now() - op["entrada_dt"] > timedelta(minutes=4):
-                await ejecutar_venta(op, precio_actual)
-                break
+                await ejecutar_venta(op, precio_actual); break
+
             await asyncio.sleep(3)
         except Exception as e:
             logger.error(f"Error en trailing stop de {op['par']}: {e}")
@@ -183,6 +183,8 @@ async def ciclo_trading():
                 logger.info(f"Saldo: {saldo:.2f} USDT | Monto por operación: {monto:.2f}")
                 for par in PARES:
                     if not bot_activo or any(op["par"] == par for op in operaciones_activas):
+                        continue
+                    if par in ultimos_pares and (datetime.now() - ultimos_pares[par]).seconds < CONFIG["cooldown_reentrada"]:
                         continue
                     analisis = await analizar_impulso(par)
                     if not analisis or analisis["puntaje"] < CONFIG["puntaje_minimo"]:
