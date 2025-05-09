@@ -58,14 +58,18 @@ CONFIG = {
     'espera_reentrada': 600,
     'ganancia_objetivo': 0.004,
     'stop_loss': -0.007,
-    'orden_minima': 5,  # Mínimo 5 USDT
-    'min_order_sizes': {
-        "PEPE-USDT": 1000,
-        "SHIB-USDT": 50000,
+    'orden_minima': 15,  # Mínimo 15 USDT para cualquier operación
+    'min_order_usd': {
+        "TRUMP-USDT": 15,  # Mínimo $15 USD para TRUMP
+        "PEPE-USDT": 5,
+        "SHIB-USDT": 5,
         "DOGE-USDT": 10,
-        "TRUMP-USDT": 1,
-        "BONK-USDT": 10000,
-        "WIF-USDT": 0.1
+        "BONK-USDT": 5,
+        "WIF-USDT": 10,
+        "SUI-USDT": 5,
+        "TURBO-USDT": 5,
+        "FLOKI-USDT": 5,
+        "KAS-USDT": 5
     }
 }
 
@@ -121,11 +125,12 @@ async def ejecutar_ciclo():
                     continue
 
                 saldo = await obtener_saldo_disponible()
-                if saldo < CONFIG['orden_minima']:
+                monto_por_operacion = (saldo * CONFIG['uso_saldo']) / CONFIG['max_operaciones']
+                
+                # Asegurar que el monto por operación sea suficiente
+                if monto_por_operacion < CONFIG['orden_minima']:
                     await asyncio.sleep(10)
                     continue
-
-                monto = (saldo * CONFIG['uso_saldo']) / CONFIG['max_operaciones']
                 
                 for par in PARES_ACTIVOS:
                     if not bot_activo:
@@ -139,9 +144,13 @@ async def ejecutar_ciclo():
 
                     señal = await analizar_par(par)
                     if señal['valido']:
-                        await ejecutar_compra(par, señal['precio'], monto)
-                        await asyncio.sleep(2)
-                        break
+                        min_order = CONFIG['min_order_usd'].get(par, CONFIG['orden_minima'])
+                        if monto_por_operacion >= min_order:
+                            await ejecutar_compra(par, señal['precio'], monto_por_operacion)
+                            await asyncio.sleep(2)
+                            break
+                        else:
+                            logging.info(f"Monto insuficiente para {par}. Se necesitan ${min_order:.2f}")
             
             await asyncio.sleep(1)
         except Exception as e:
@@ -178,29 +187,23 @@ async def ejecutar_compra(par, precio, monto):
         if not current_symbol:
             raise ValueError(f"No se encontró información para el par {par}")
         
-        # Obtener parámetros de la orden
+        # Calcular cantidad
         base_increment = float(current_symbol['baseIncrement'])
         min_order_size = float(current_symbol['baseMinSize'])
-        min_order_usd = CONFIG['min_order_sizes'].get(par, 0) * precio
         
-        # Calcular cantidad
         cantidad = Decimal(str(monto)) / Decimal(str(precio))
         step = Decimal(str(base_increment))
         cantidad_corr = (cantidad // step) * step
         
         # Verificar mínimos
         if cantidad_corr < Decimal(str(min_order_size)):
-            raise ValueError(f"Cantidad muy pequeña. Mínimo {min_order_size} {par.split('-')[0]}")
-            
-        if monto < min_order_usd:
-            raise ValueError(f"Monto muy pequeño. Mínimo ${min_order_usd:.2f} USD")
+            raise ValueError(f"Cantidad mínima no alcanzada. Mínimo {min_order_size} {par.split('-')[0]}")
         
         # Ejecutar orden
         orden = trade.create_market_order(
             symbol=par,
             side='buy',
-            size=str(float(cantidad_corr))  # Convertir a float para evitar notación científica
-        )
+            size=str(float(cantidad_corr))
         
         nueva_operacion = {
             'par': par,
@@ -265,13 +268,14 @@ async def ejecutar_venta(op):
         
         ganancia = op['ganancia']
         resultado = "GANANCIA" if ganancia > 0 else "PÉRDIDA"
+        porcentaje = ((op['maximo'] - op['entrada']) / op['entrada']) * 100
         
         historial.append({
             'fecha': datetime.now().strftime("%Y-%m-%d %H:%M"),
             'par': op['par'],
             'resultado': resultado,
             'ganancia': ganancia,
-            'porcentaje': ((op['maximo'] - op['entrada']) / op['entrada']) * 100
+            'porcentaje': porcentaje
         })
         
         operaciones.remove(op)
@@ -283,7 +287,7 @@ async def ejecutar_venta(op):
             f"🔴 VENTA: {op['par']}\n"
             f"Precio: {op['maximo']:.8f}\n"
             f"Ganancia: {ganancia:.4f} USD ({resultado})\n"
-            f"Rentabilidad: {((op['maximo'] - op['entrada']) / op['entrada'] * 100):.2f}%"
+            f"Rentabilidad: {porcentaje:.2f}%"
         )
         
     except Exception as e:
