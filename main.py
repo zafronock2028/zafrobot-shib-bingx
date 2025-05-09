@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 # ------------------------- CONFIGURACIÓN INICIAL -------------------------
 load_dotenv()
 
+# Configuración de logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -112,9 +113,10 @@ async def analizar_par(par):
         
         stats = market.get_24h_stats(symbol=par)
         volumen = float(stats['volValue'])
+        cambio = (precios[-1] - precios[-2]) / precios[-2]
         
-        if (desviacion < 0.02 and volumen > 500000 and ultimo > precios[-2]):
-            logger.info(f"✅ Señal válida en {par} (Precio: {ultimo:.8f})")
+        if (cambio > 0.001 and desviacion < 0.02 and volumen > 500000):
+            logger.info(f"✅ Señal válida en {par} | Precio: {ultimo:.8f}")
             return {'par': par, 'precio': ultimo, 'valido': True}
             
     except Exception as e:
@@ -138,12 +140,10 @@ async def ejecutar_compra(par, precio, monto):
         if cantidad_corr < Decimal(str(min_order_size)):
             raise ValueError(f"Mínimo no alcanzado: {min_order_size} {par.split('-')[0]}")
         
-        # CORRECCIÓN: Paréntesis correctamente cerrados
         orden = trade.create_market_order(
             symbol=par,
             side='buy',
             size=str(float(cantidad_corr))
-        )  # ← Este paréntesis estaba faltando
         
         nueva_operacion = {
             'par': par,
@@ -192,12 +192,10 @@ async def monitorear_operacion(op):
 
 async def ejecutar_venta(op):
     try:
-        # CORRECCIÓN: Paréntesis cerrados correctamente
         orden = trade.create_market_order(
             symbol=op['par'],
             side='sell',
-            size=str(op['cantidad'])
-        )  # ← Este paréntesis estaba faltando
+            size=str(op['cantidad']))
         
         ganancia = (op['maximo'] - op['entrada']) * op['cantidad']
         resultado = "GANANCIA" if ganancia > 0 else "PÉRDIDA"
@@ -234,16 +232,19 @@ async def ejecutar_ciclo_trading():
         try:
             async with lock:
                 if len(operaciones) >= CONFIG['max_operaciones']:
+                    logger.info("Máximo de operaciones alcanzado")
                     await asyncio.sleep(10)
                     continue
                 
                 saldo = await obtener_saldo_disponible()
-                monto_por_operacion = (saldo * CONFIG['uso_saldo']) / CONFIG['max_operaciones']
-                
-                if monto_por_operacion < CONFIG['orden_minima']:
+                if saldo < CONFIG['orden_minima']:
+                    logger.warning(f"Saldo insuficiente: {saldo:.2f} USDT")
                     await asyncio.sleep(30)
                     continue
-                
+
+                monto_por_operacion = (saldo * CONFIG['uso_saldo']) / CONFIG['max_operaciones']
+                logger.info(f"Saldo disponible: {saldo:.2f} USDT | Monto por operación: {monto_por_operacion:.2f}")
+
                 for par in PARES_ACTIVOS:
                     if not bot_activo:
                         break
@@ -255,13 +256,15 @@ async def ejecutar_ciclo_trading():
                         continue
                     
                     señal = await analizar_par(par)
-                    if señal['valido'] and monto_por_operacion >= CONFIG['min_order_usd'].get(par, 15):
-                        await ejecutar_compra(par, señal['precio'], monto_por_operacion)
-                        await asyncio.sleep(5)
-                        break
+                    if señal['valido']:
+                        min_order = CONFIG['min_order_usd'].get(par, CONFIG['orden_minima'])
+                        if monto_por_operacion >= min_order:
+                            logger.info(f"🔔 Señal válida encontrada para {par}")
+                            await ejecutar_compra(par, señal['precio'], monto_por_operacion)
+                            await asyncio.sleep(5)
+                            break
             
-            await asyncio.sleep(3)
-            
+            await asyncio.sleep(5)
         except Exception as e:
             logger.error(f"Error en ciclo principal: {e}")
             await asyncio.sleep(10)
