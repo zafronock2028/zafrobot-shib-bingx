@@ -1,4 +1,4 @@
 #!/bin/bash
-echo "Iniciando Zafrobot Dinámico Pro..."
-python keep_alive.py &  # Inicia el keep-alive en segundo plano
-python main.py
+echo "🔄 Iniciando ZafroBot..."
+python keep_alive.py   # Servidor keep-alive en segundo plano
+python main.py         # Bot principal
