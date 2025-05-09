@@ -60,7 +60,7 @@ CONFIG = {
     'stop_loss': -0.007,
     'orden_minima': 15,  # Mínimo 15 USDT para cualquier operación
     'min_order_usd': {
-        "TRUMP-USDT": 15,  # Mínimo $15 USD para TRUMP
+        "TRUMP-USDT": 15,
         "PEPE-USDT": 5,
         "SHIB-USDT": 5,
         "DOGE-USDT": 10,
@@ -127,7 +127,6 @@ async def ejecutar_ciclo():
                 saldo = await obtener_saldo_disponible()
                 monto_por_operacion = (saldo * CONFIG['uso_saldo']) / CONFIG['max_operaciones']
                 
-                # Asegurar que el monto por operación sea suficiente
                 if monto_por_operacion < CONFIG['orden_minima']:
                     await asyncio.sleep(10)
                     continue
@@ -180,14 +179,12 @@ async def analizar_par(par):
 
 async def ejecutar_compra(par, precio, monto):
     try:
-        # Obtener información del símbolo
         symbol_info = market.get_symbol_list()
         current_symbol = next((s for s in symbol_info if s['symbol'] == par), None)
         
         if not current_symbol:
             raise ValueError(f"No se encontró información para el par {par}")
         
-        # Calcular cantidad
         base_increment = float(current_symbol['baseIncrement'])
         min_order_size = float(current_symbol['baseMinSize'])
         
@@ -195,11 +192,9 @@ async def ejecutar_compra(par, precio, monto):
         step = Decimal(str(base_increment))
         cantidad_corr = (cantidad // step) * step
         
-        # Verificar mínimos
         if cantidad_corr < Decimal(str(min_order_size)):
             raise ValueError(f"Cantidad mínima no alcanzada. Mínimo {min_order_size} {par.split('-')[0]}")
         
-        # Ejecutar orden
         orden = trade.create_market_order(
             symbol=par,
             side='buy',
@@ -297,7 +292,6 @@ async def ejecutar_venta(op):
             f"❌ Error en venta {op['par']}:\n{str(e)}"
         )
 
-# ------------------------- FUNCIONES AUXILIARES -------------------------
 async def obtener_saldo_disponible():
     try:
         cuentas = user.get_account_list()
@@ -346,7 +340,6 @@ async def mostrar_historial(message: types.Message):
         )
     await message.answer(mensaje)
 
-# ------------------------- INICIO DE LA APLICACIÓN -------------------------
 async def iniciar_bot():
     await dp.start_polling(bot)
 
