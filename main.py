@@ -58,10 +58,14 @@ CONFIG = {
     'espera_reentrada': 600,
     'ganancia_objetivo': 0.004,
     'stop_loss': -0.007,
-    'orden_minima': 2.5,
-    'step_sizes': {
-        "SUI-USDT": 0.1, "TRUMP-USDT": 0.01, "BONK-USDT": 0.01,
-        "TURBO-USDT": 0.01, "WIF-USDT": 0.01
+    'orden_minima': 5,  # Mínimo 5 USDT
+    'min_order_sizes': {
+        "PEPE-USDT": 1000,
+        "SHIB-USDT": 50000,
+        "DOGE-USDT": 10,
+        "TRUMP-USDT": 1,
+        "BONK-USDT": 10000,
+        "WIF-USDT": 0.1
     }
 }
 
@@ -157,7 +161,7 @@ async def analizar_par(par):
         cambio = (precios[-1] - precios[-2]) / precios[-2]
         
         if (cambio > 0.001 and desviacion < 0.02 and volumen > 500000):
-            logging.info(f"Señal válida en {par} | Precio: {ultimo:.6f}")
+            logging.info(f"Señal válida en {par} | Precio: {ultimo:.8f}")
             return {'par': par, 'precio': ultimo, 'valido': True}
             
     except Exception as e:
@@ -167,38 +171,63 @@ async def analizar_par(par):
 
 async def ejecutar_compra(par, precio, monto):
     try:
-        step = Decimal(str(CONFIG['step_sizes'].get(par, 0.0001)))
-        cantidad = (Decimal(str(monto)) / Decimal(str(precio)))
-        cantidad = (cantidad // step) * step
+        # Obtener información del símbolo
+        symbol_info = market.get_symbol_list()
+        current_symbol = next((s for s in symbol_info if s['symbol'] == par), None)
         
+        if not current_symbol:
+            raise ValueError(f"No se encontró información para el par {par}")
+        
+        # Obtener parámetros de la orden
+        base_increment = float(current_symbol['baseIncrement'])
+        min_order_size = float(current_symbol['baseMinSize'])
+        min_order_usd = CONFIG['min_order_sizes'].get(par, 0) * precio
+        
+        # Calcular cantidad
+        cantidad = Decimal(str(monto)) / Decimal(str(precio))
+        step = Decimal(str(base_increment))
+        cantidad_corr = (cantidad // step) * step
+        
+        # Verificar mínimos
+        if cantidad_corr < Decimal(str(min_order_size)):
+            raise ValueError(f"Cantidad muy pequeña. Mínimo {min_order_size} {par.split('-')[0]}")
+            
+        if monto < min_order_usd:
+            raise ValueError(f"Monto muy pequeño. Mínimo ${min_order_usd:.2f} USD")
+        
+        # Ejecutar orden
         orden = trade.create_market_order(
             symbol=par,
             side='buy',
-            size=str(cantidad)
+            size=str(float(cantidad_corr))  # Convertir a float para evitar notación científica
         )
         
         nueva_operacion = {
             'par': par,
             'entrada': float(precio),
-            'cantidad': float(cantidad),
+            'cantidad': float(cantidad_corr),
             'maximo': float(precio),
             'ganancia': 0.0
         }
         
         operaciones.append(nueva_operacion)
-        logging.info(f"Compra ejecutada: {par} {cantidad} @ {precio}")
+        logging.info(f"Compra ejecutada: {par} {float(cantidad_corr):.8f} @ {precio:.8f}")
         await bot.send_message(
             TELEGRAM_CHAT_ID,
             f"🟢 COMPRA: {par}\n"
-            f"Precio: {precio:.6f}\n"
-            f"Cantidad: {float(cantidad):.2f}"
+            f"Precio: {precio:.8f}\n"
+            f"Cantidad: {float(cantidad_corr):.8f}\n"
+            f"Inversión: ${monto:.2f} USD"
         )
         
         asyncio.create_task(monitorear_operacion(nueva_operacion))
         
     except Exception as e:
-        logging.error(f"Error en compra {par}: {e}")
-        await bot.send_message(TELEGRAM_CHAT_ID, f"❌ Error en compra {par}: {str(e)}")
+        logging.error(f"Error en compra {par}: {str(e)}")
+        await bot.send_message(
+            TELEGRAM_CHAT_ID,
+            f"❌ Error en compra {par}:\n{str(e)}"
+        )
 
 async def monitorear_operacion(op):
     while op in operaciones and bot_activo:
@@ -235,13 +264,14 @@ async def ejecutar_venta(op):
         )
         
         ganancia = op['ganancia']
-        resultado = "GANANCIA" if ganancia > 0 else "PERDIDA"
+        resultado = "GANANCIA" if ganancia > 0 else "PÉRDIDA"
         
         historial.append({
             'fecha': datetime.now().strftime("%Y-%m-%d %H:%M"),
             'par': op['par'],
             'resultado': resultado,
-            'ganancia': ganancia
+            'ganancia': ganancia,
+            'porcentaje': ((op['maximo'] - op['entrada']) / op['entrada']) * 100
         })
         
         operaciones.remove(op)
@@ -251,13 +281,17 @@ async def ejecutar_venta(op):
         await bot.send_message(
             TELEGRAM_CHAT_ID,
             f"🔴 VENTA: {op['par']}\n"
-            f"Precio: {op['maximo']:.6f}\n"
-            f"Ganancia: {ganancia:.4f} {resultado}"
+            f"Precio: {op['maximo']:.8f}\n"
+            f"Ganancia: {ganancia:.4f} USD ({resultado})\n"
+            f"Rentabilidad: {((op['maximo'] - op['entrada']) / op['entrada'] * 100):.2f}%"
         )
         
     except Exception as e:
         logging.error(f"Error en venta {op['par']}: {e}")
-        await bot.send_message(TELEGRAM_CHAT_ID, f"❌ Error en venta {op['par']}: {str(e)}")
+        await bot.send_message(
+            TELEGRAM_CHAT_ID,
+            f"❌ Error en venta {op['par']}:\n{str(e)}"
+        )
 
 # ------------------------- FUNCIONES AUXILIARES -------------------------
 async def obtener_saldo_disponible():
@@ -279,11 +313,16 @@ async def mostrar_operaciones_activas(message: types.Message):
     
     mensaje = "📊 Operaciones Activas:\n\n"
     for op in operaciones:
+        current_price = float(market.get_ticker(op['par'])['price'])
+        profit = (current_price - op['entrada']) * op['cantidad']
+        profit_percent = (current_price - op['entrada']) / op['entrada'] * 100
+        
         mensaje += (
-            f"Par: {op['par']}\n"
-            f"Entrada: {op['entrada']:.6f}\n"
-            f"Actual: {op['maximo']:.6f}\n"
-            f"Ganancia: {op['ganancia']:.4f} USDT\n\n"
+            f"🔹 {op['par']}\n"
+            f"Entrada: {op['entrada']:.8f}\n"
+            f"Actual: {current_price:.8f}\n"
+            f"Cantidad: {op['cantidad']:.2f}\n"
+            f"Ganancia: {profit:.4f} USD ({profit_percent:.2f}%)\n\n"
         )
     await message.answer(mensaje)
 
@@ -295,8 +334,11 @@ async def mostrar_historial(message: types.Message):
     mensaje = "📜 Últimas 10 operaciones:\n\n"
     for op in historial[-10:]:
         mensaje += (
-            f"{op['fecha']} - {op['par']} - "
-            f"{op['resultado']} - {op['ganancia']:.4f} USDT\n"
+            f"⏰ {op['fecha']}\n"
+            f"🔹 {op['par']}\n"
+            f"📊 {op['resultado']}: {op['ganancia']:.4f} USD\n"
+            f"📈 {op['porcentaje']:.2f}%\n"
+            f"────────────────────\n"
         )
     await message.answer(mensaje)
 
