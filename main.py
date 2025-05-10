@@ -22,7 +22,7 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
-logger = logging.getLogger("KuCoinLowBalanceBot")
+logger = logging.getLogger("KuCoinAntiPrematureBot")
 
 # Configuración de entorno
 API_KEY = os.getenv("API_KEY")
@@ -38,36 +38,45 @@ user = User(key=API_KEY, secret=SECRET_KEY, passphrase=API_PASSPHRASE)
 bot = Bot(token=TELEGRAM_TOKEN)
 dp = Dispatcher()
 
-# Pares optimizados para saldos pequeños (~$35)
+# Pares seleccionados (optimizados para evitar cierres prematuros)
 PARES = [
     "SHIB-USDT", "PEPE-USDT", "FLOKI-USDT", "DOGE-USDT",
-    "SUI-USDT", "TURBO-USDT", "BONK-USDT"
+    "SUI-USDT", "TURBO-USDT", "BONK-USDT", "WIF-USDT"
 ]
 
-# Configuración ajustada para saldos pequeños
+# Configuración por par (cooldowns y requisitos ajustados)
 PARES_CONFIG = {
-    "SHIB-USDT": {"inc": 1000, "min": 50000, "volatilidad": 1.8},
-    "PEPE-USDT": {"inc": 100, "min": 5000, "volatilidad": 2.0},
-    "FLOKI-USDT": {"inc": 100, "min": 5000, "volatilidad": 1.9},
-    "DOGE-USDT": {"inc": 1, "min": 5, "volatilidad": 1.5},
-    "SUI-USDT": {"inc": 0.01, "min": 0.05, "volatilidad": 1.3},
-    "TURBO-USDT": {"inc": 100, "min": 5000, "volatilidad": 2.2},
-    "BONK-USDT": {"inc": 1000, "min": 50000, "volatilidad": 2.1}
+    "SHIB-USDT": {"inc": 1000, "min": 50000, "volatilidad": 1.5, "cooldown": 30},
+    "PEPE-USDT": {"inc": 100, "min": 5000, "volatilidad": 1.8, "cooldown": 30},
+    "FLOKI-USDT": {"inc": 100, "min": 5000, "volatilidad": 1.7, "cooldown": 45},
+    "DOGE-USDT": {"inc": 1, "min": 5, "volatilidad": 1.3, "cooldown": 30},
+    "SUI-USDT": {"inc": 0.01, "min": 0.05, "volatilidad": 1.2, "cooldown": 30},
+    "TURBO-USDT": {"inc": 100, "min": 5000, "volatilidad": 1.9, "cooldown": 45},
+    "BONK-USDT": {"inc": 1000, "min": 50000, "volatilidad": 1.6, "cooldown": 45},
+    "WIF-USDT": {"inc": 0.0001, "min": 0.01, "volatilidad": 1.4, "cooldown": 30}
 }
 
+# Configuración global optimizada (para evitar cierres prematuros)
 CONFIG = {
-    "uso_saldo": 0.90,           # Usamos el 90% del saldo disponible
-    "max_operaciones": 2,        # Máximo 2 operaciones simultáneas
-    "puntaje_minimo": 2.0,       # Puntaje mínimo más flexible
-    "reanalisis_segundos": 10,   # Intervalo de análisis más largo
-    "max_duracion_minutos": 5,   # Duración máxima reducida
-    "spread_maximo": 0.0025,     # Spread máximo permitido (0.25%)
-    "saldo_minimo": 5.00         # Mínimo USDT requerido por operación
+    "uso_saldo": 0.75,            # 75% del saldo para operaciones
+    "max_operaciones": 2,         # Menos operaciones simultáneas
+    "puntaje_minimo": 3.0,        # Filtro más estricto para entradas
+    "reanalisis_segundos": 20,    # Intervalo de análisis más largo
+    "max_duracion_minutos": 30,   # Duración máxima extendida (30 min)
+    "spread_maximo": 0.001,       # Spread máximo reducido (0.1%)
+    "saldo_minimo": 20.00,        # Mínimo recomendado por operación
+    "vol_minima": 1000000,        # Volumen mínimo en USDT (24h) - $1M
+    "min_ganancia_objetivo": 0.015,  # 1.5% ganancia mínima esperada
+    "nivel_proteccion": -0.01,    # Stop loss del 1% (más flexible)
+    "max_ops_mismo_par": 3,       # Máx operaciones consecutivas por par
+    "horas_reset_ops": 6          # Horas para resetear contadores
 }
 
 # Variables globales
 operaciones_activas = []
 historial_operaciones = []
+operaciones_recientes = {}  # {par: {"last_op": datetime, "count": int}}
+cooldown_activo = set()
 bot_activo = False
 lock = asyncio.Lock()
 
@@ -75,7 +84,17 @@ lock = asyncio.Lock()
 try:
     with open('historial_operaciones.json', 'r') as f:
         historial_operaciones = json.load(f)
-except:
+    # Cargar operaciones recientes desde el historial
+    for op in historial_operaciones[-50:]:  # Últimas 50 operaciones
+        par = op["par"]
+        op_time = datetime.fromisoformat(op["entrada_dt"])
+        if par in operaciones_recientes:
+            if op_time > operaciones_recientes[par]["last_op"]:
+                operaciones_recientes[par] = {"last_op": op_time, "count": operaciones_recientes[par]["count"] + 1}
+        else:
+            operaciones_recientes[par] = {"last_op": op_time, "count": 1}
+except Exception as e:
+    logger.warning(f"Error cargando historial: {e}")
     historial_operaciones = []
 
 async def guardar_historial():
@@ -85,6 +104,31 @@ async def guardar_historial():
             json.dump(historial_operaciones, f, indent=2)
     except Exception as e:
         logger.error(f"Error guardando historial: {e}")
+
+async def verificar_cooldown(par):
+    """Verifica si un par está en periodo de cooldown o ha alcanzado el límite de operaciones"""
+    ahora = datetime.now()
+    
+    # Verificar si ha alcanzado el máximo de operaciones consecutivas
+    if par in operaciones_recientes:
+        # Resetear contador si ha pasado el tiempo definido
+        if (ahora - operaciones_recientes[par]["last_op"]).total_seconds() > CONFIG["horas_reset_ops"] * 3600:
+            operaciones_recientes[par]["count"] = 0
+        
+        if operaciones_recientes[par]["count"] >= CONFIG["max_ops_mismo_par"]:
+            logger.info(f"Par {par} alcanzó el máximo de operaciones consecutivas")
+            return True
+    
+    # Verificar cooldown normal
+    if par in cooldown_activo:
+        cooldown_min = PARES_CONFIG.get(par, {}).get("cooldown", 30)
+        if par in operaciones_recientes:
+            tiempo_desde_ultima = (ahora - operaciones_recientes[par]["last_op"]).total_seconds()
+            if tiempo_desde_ultima < cooldown_min * 60:
+                return True
+            else:
+                cooldown_activo.remove(par)
+    return False
 
 async def obtener_saldo():
     """Obtiene el saldo disponible en USDT con verificación de mínimo"""
@@ -110,46 +154,66 @@ async def obtener_saldo():
         return 0.0
 
 async def analizar_impulso(par):
-    """Analiza el impulso del mercado para un par específico"""
+    """Analiza el impulso del mercado con filtros mejorados para evitar entradas prematuras"""
     try:
-        # Obtener datos de mercado
-        velas = market.get_kline(symbol=par, kline_type="1min", limit=4)
-        if not velas or len(velas) < 4:
+        # Verificar volumen mínimo primero
+        stats_24h = market.get_24h_stats(par)
+        volumen_usdt = float(stats_24h["volValue"])
+        if volumen_usdt < CONFIG["vol_minima"]:
+            logger.info(f"Volumen insuficiente para {par}: {volumen_usdt:.2f} USDT")
+            return None
+            
+        # Obtener datos de mercado con velas de 5 minutos
+        velas = market.get_kline(symbol=par, kline_type="5min", limit=6)
+        if not velas or len(velas) < 6:
             return None
             
         precios = [float(v[2]) for v in velas]  # Precios de cierre
-        volumen_24h = float(market.get_24h_stats(par)["volValue"])
         ticker = market.get_ticker(par)
         spread_actual = (float(ticker["bestAsk"]) - float(ticker["bestBid"])) / float(ticker["bestAsk"])
         
-        # Análisis técnico para saldos pequeños
-        velas_positivas = sum(1 for i in range(1, len(precios)) if precios[i] > precios[i-1] * 1.0015)  # Subida > 0.15%
-        momentum = (precios[-1] - precios[-3]) / precios[-3]  # Momentum de 3 velas
+        # Filtros estrictos de entrada
+        if spread_actual > CONFIG["spread_maximo"]:
+            return None
+            
+        # Análisis técnico mejorado
+        velas_positivas = sum(1 for i in range(1, len(precios)) if precios[i] > precios[i-1] * 1.003)  # Subida > 0.3%
+        momentum_corto = (precios[-1] - precios[-2]) / precios[-2]
+        momentum_largo = (precios[-1] - precios[-4]) / precios[-4]  # Comparación con 20 minutos atrás
         volatilidad = PARES_CONFIG[par].get("volatilidad", 1.5)
         
+        # Requerir al menos 4 velas alcistas de 6
+        if velas_positivas < 4:
+            return None
+            
         # Cálculo de puntaje ajustado
         puntaje = (
-            (velas_positivas * 0.5) + 
-            (momentum * 2.0) + 
-            (min(volumen_24h, 2_000_000) / 1_500_000) +  # Cap volumen a 2M
-            (volatilidad * 0.7) -
-            (spread_actual * 400)  # Penaliza spreads altos
+            (velas_positivas * 0.6) + 
+            (momentum_corto * 2.0) + 
+            (momentum_largo * 1.5) + 
+            (min(volumen_usdt, 3000000) / 2000000) +  # Cap volumen a 3M
+            (volatilidad * 0.8) -
+            (spread_actual * 800)  # Penalización fuerte por spread
         )
         
+        if puntaje < CONFIG["puntaje_minimo"]:
+            return None
+            
         return {
             "par": par,
             "precio": precios[-1],
             "puntaje": puntaje,
-            "volumen": volumen_24h,
+            "volumen": volumen_usdt,
+            "momentum": momentum_corto,
             "spread": spread_actual,
-            "min_required": PARES_CONFIG[par]["min"] * precios[-1]  # Mínimo requerido en USDT
+            "min_required": PARES_CONFIG[par]["min"] * precios[-1]
         }
     except Exception as e:
         logger.error(f"Error analizando {par}: {e}")
         return None
 
 async def ejecutar_compra(par, precio, monto_usdt):
-    """Ejecuta una orden de compra con validación para saldos pequeños"""
+    """Ejecuta una orden de compra con validación mejorada"""
     try:
         config_par = PARES_CONFIG.get(par)
         if not config_par:
@@ -202,6 +266,20 @@ async def ejecutar_compra(par, precio, monto_usdt):
         
         operaciones_activas.append(op)
         
+        # Actualizar operaciones recientes
+        ahora = datetime.now()
+        if par in operaciones_recientes:
+            # Resetear contador si ha pasado el tiempo definido
+            if (ahora - operaciones_recientes[par]["last_op"]).total_seconds() > CONFIG["horas_reset_ops"] * 3600:
+                operaciones_recientes[par]["count"] = 1
+            else:
+                operaciones_recientes[par]["count"] += 1
+            operaciones_recientes[par]["last_op"] = ahora
+        else:
+            operaciones_recientes[par] = {"last_op": ahora, "count": 1}
+        
+        cooldown_activo.add(par)
+        
         # Notificación detallada
         await bot.send_message(
             CHAT_ID,
@@ -212,8 +290,9 @@ async def ejecutar_compra(par, precio, monto_usdt):
             f"• Cantidad: `{float(size):.2f}`\n"
             f"• Mínimo requerido: `{min_required:.2f} USDT`\n"
             f"• Spread inicial: `{spread*100:.2f}%`\n"
-            f"• Hora: `{datetime.now().strftime('%H:%M:%S')}`\n\n"
-            f"📊 _Iniciando trailing stop..._",
+            f"• Operaciones recientes: `{operaciones_recientes[par]['count']}/{CONFIG['max_ops_mismo_par']}`\n"
+            f"• Hora: `{ahora.strftime('%H:%M:%S')}`\n\n"
+            f"📊 _Iniciando trailing stop (duración máxima: {CONFIG['max_duracion_minutos']} min)..._",
             parse_mode="Markdown"
         )
         
@@ -234,17 +313,26 @@ async def ejecutar_compra(par, precio, monto_usdt):
         return False
 
 async def trailing_stop(op):
-    """Trailing stop optimizado para saldos pequeños"""
+    """Trailing stop optimizado para evitar cierres prematuros"""
     par = op["par"]
     entrada_dt = datetime.fromisoformat(op["entrada_dt"])
     max_duracion = timedelta(minutes=CONFIG["max_duracion_minutos"])
     volatilidad = PARES_CONFIG[par].get("volatilidad", 1.5)
+    spread_inicial = op["spread_inicial"]
+    
+    # Variables para seguimiento mejorado
+    ultimo_maximo = op["entrada"]
+    precio_objetivo = op["entrada"] * (1 + CONFIG["min_ganancia_objetivo"])
+    check_interval = 15  # Verificar cada 15 segundos (menos frecuente)
+    timeout_inicio = datetime.now() + timedelta(minutes=15)  # Sólo verificar timeout después de 15 min
     
     while bot_activo and op in operaciones_activas:
         try:
-            # Verificar timeout
-            if datetime.now() - entrada_dt > max_duracion:
-                logger.info(f"Timeout alcanzado para {par}")
+            ahora = datetime.now()
+            
+            # Verificar timeout sólo después de 15 minutos
+            if ahora > timeout_inicio and (ahora - entrada_dt) > max_duracion:
+                logger.info(f"Timeout alcanzado para {par} después de {CONFIG['max_duracion_minutos']} min")
                 await ejecutar_venta(op, "timeout")
                 break
                 
@@ -254,35 +342,48 @@ async def trailing_stop(op):
             spread_actual = (float(ticker["bestAsk"]) - float(ticker["bestBid"])) / float(ticker["bestAsk"])
             
             # Actualizar máximo
-            if precio_actual > op["maximo"]:
-                op["maximo"] = precio_actual
+            if precio_actual > ultimo_maximo:
+                ultimo_maximo = precio_actual
+                # Ajustar objetivo dinámicamente (nuevo máximo + 0.8%)
+                precio_objetivo = max(precio_objetivo, precio_actual * 1.008)
+                timeout_inicio = ahora + timedelta(minutes=15)  # Resetear timeout
             
             # Calcular métricas
             ganancia_pct = (precio_actual - op["entrada"]) / op["entrada"] * 100
-            retroceso_pct = (op["maximo"] - precio_actual) / op["maximo"] * 100
+            retroceso_pct = (ultimo_maximo - precio_actual) / ultimo_maximo * 100
             
-            # Condiciones de salida ajustadas para saldos pequeños
-            if ganancia_pct >= 1.8 * volatilidad and retroceso_pct >= 1.0 * volatilidad:
-                await ejecutar_venta(op, "take_profit_2x")
-                break
-            elif ganancia_pct >= 1.2 * volatilidad and retroceso_pct >= 0.7 * volatilidad:
-                await ejecutar_venta(op, "take_profit_1.5x")
-                break
-            elif ganancia_pct >= 0.8 * volatilidad and retroceso_pct >= 0.4 * volatilidad:
-                await ejecutar_venta(op, "take_profit_1x")
-                break
-            elif spread_actual > CONFIG["spread_maximo"] * 1.5:  # Spread aumenta 50%
-                await ejecutar_venta(op, "spread_alto")
+            # Condiciones de salida optimizadas:
+            
+            # 1. Take Profit principal (alcanzó objetivo mínimo)
+            if precio_actual >= precio_objetivo:
+                await ejecutar_venta(op, f"take_profit_{ganancia_pct:.1f}%")
                 break
                 
-            await asyncio.sleep(3)
+            # 2. Take Profit parcial (cierre con ganancia si el mercado se vuelve adverso)
+            elif (ganancia_pct >= 1.0 and 
+                  spread_actual > spread_inicial * 2 and 
+                  retroceso_pct >= 1.0):
+                await ejecutar_venta(op, f"take_profit_parcial_{ganancia_pct:.1f}%")
+                break
+                
+            # 3. Protección contra spread excesivo
+            elif spread_actual > CONFIG["spread_maximo"] * 3:
+                await ejecutar_venta(op, "spread_excesivo")
+                break
+                
+            # 4. Stop loss flexible
+            elif ganancia_pct <= CONFIG["nivel_proteccion"] * 100:
+                await ejecutar_venta(op, f"stop_loss_{ganancia_pct:.1f}%")
+                break
+                
+            await asyncio.sleep(check_interval)
             
         except Exception as e:
             logger.error(f"Error en trailing stop {par}: {str(e)}")
-            await asyncio.sleep(5)
+            await asyncio.sleep(20)
 
 async def ejecutar_venta(op, razon):
-    """Ejecuta la venta y registra los resultados"""
+    """Ejecuta la venta y registra los resultados con cooldown"""
     try:
         par = op["par"]
         ticker = market.get_ticker(par)
@@ -317,10 +418,10 @@ async def ejecutar_venta(op, razon):
         # Preparar mensaje
         razones = {
             "timeout": "⏰ Tiempo máximo alcanzado",
-            "take_profit_1x": "🎯 Take Profit 1X (0.8%)",
-            "take_profit_1.5x": "🎯 Take Profit 1.5X (1.2%)",
-            "take_profit_2x": "🎯 Take Profit 2X (1.8%)",
-            "spread_alto": "📉 Spread demasiado alto"
+            "take_profit": "🎯 Take Profit alcanzado",
+            "take_profit_parcial": "🎯 Take Profit parcial",
+            "spread_excesivo": "📉 Spread excesivo",
+            "stop_loss": "🛑 Stop Loss"
         }
         
         emoji = "🟢" if ganancia_usdt >= 0 else "🔴"
@@ -333,8 +434,9 @@ async def ejecutar_venta(op, razon):
             f"• Ganancia: `{ganancia_usdt:.4f} USDT`\n"
             f"• Rentabilidad: `{rentabilidad_pct:.2f}%`\n"
             f"• Duración: `{duracion:.1f} minutos`\n"
-            f"• Razón: `{razones.get(razon, razon)}`\n"
-            f"• Spread final: `{spread_actual*100:.2f}%`\n\n"
+            f"• Razón: `{razones.get(razon.split('_')[0], razon)}`\n"
+            f"• Spread final: `{spread_actual*100:.2f}%`\n"
+            f"• Operaciones recientes: `{operaciones_recientes.get(par, {}).get('count', 1)}/{CONFIG['max_ops_mismo_par']}`\n\n"
             f"📊 _Actualizando historial..._"
         )
         
@@ -352,8 +454,8 @@ async def ejecutar_venta(op, razon):
         )
 
 async def ciclo_trading():
-    """Ciclo principal de trading optimizado para saldos pequeños"""
-    await asyncio.sleep(10)  # Espera inicial más corta
+    """Ciclo principal con gestión mejorada de rotación de pares"""
+    await asyncio.sleep(20)  # Espera inicial más larga
     
     while bot_activo:
         try:
@@ -366,7 +468,7 @@ async def ciclo_trading():
                 # Obtener saldo
                 saldo = await obtener_saldo()
                 if saldo < CONFIG["saldo_minimo"]:
-                    await asyncio.sleep(30)  # Espera más larga si saldo es muy bajo
+                    await asyncio.sleep(30)
                     continue
                     
                 # Calcular monto por operación
@@ -374,11 +476,10 @@ async def ciclo_trading():
                 monto_por_op = (saldo * CONFIG["uso_saldo"]) / ops_disponibles
                 
                 # Analizar pares disponibles
-                ya_usados = [op["par"] for op in operaciones_activas]
                 candidatos = []
-                
                 for par in PARES:
-                    if par in ya_usados:
+                    # Verificar cooldown y límites de operaciones
+                    if await verificar_cooldown(par):
                         continue
                         
                     analisis = await analizar_impulso(par)
@@ -391,13 +492,16 @@ async def ciclo_trading():
                     await asyncio.sleep(CONFIG["reanalisis_segundos"])
                     continue
                 
-                # Seleccionar mejor oportunidad con saldo suficiente
-                mejor = max(candidatos, key=lambda x: x["puntaje"])
+                # Ordenar candidatos por puntaje y rotación
+                candidatos.sort(key=lambda x: (
+                    -x["puntaje"],  # Primero por puntaje
+                    operaciones_recientes.get(x["par"], {}).get("count", 0)  # Luego por operaciones recientes
+                ))
                 
-                # Ejecutar compra si tenemos saldo suficiente
-                if monto_por_op >= mejor["min_required"]:
-                    if not await ejecutar_compra(mejor["par"], mejor["precio"], monto_por_op):
-                        await asyncio.sleep(3)
+                # Seleccionar mejor opción con rotación
+                mejor = candidatos[0]
+                if await ejecutar_compra(mejor["par"], mejor["precio"], monto_por_op):
+                    await asyncio.sleep(5)  # Pequeña pausa entre operaciones
                 
             await asyncio.sleep(CONFIG["reanalisis_segundos"])
             
@@ -407,10 +511,10 @@ async def ciclo_trading():
                 CHAT_ID,
                 f"⚠️ *ERROR EN CICLO TRADING* ⚠️\n\n"
                 f"`{str(e)}`\n\n"
-                f"_Reintentando en 15 segundos..._",
+                f"_Reintentando en 20 segundos..._",
                 parse_mode="Markdown"
             )
-            await asyncio.sleep(15)
+            await asyncio.sleep(20)
 
 def crear_teclado():
     """Crea el teclado interactivo de Telegram"""
@@ -429,19 +533,18 @@ def crear_teclado():
 async def start_cmd(msg: types.Message):
     """Mensaje de inicio/ayuda optimizado"""
     await msg.answer(
-        "🤖 *Bot de Trading KuCoin - Versión Saldo Pequeño* 🤖\n\n"
-        "🔹 *Saldo actual:* ~$35 USDT\n"
-        "🔹 *Pares disponibles:* 7 (optimizados para bajo capital)\n"
-        "🔹 *Estrategia:* Impulso con gestión de riesgo ajustada\n\n"
+        "🤖 *Bot de Trading KuCoin - Anti Cierres Prematuros* 🤖\n\n"
+        "🔹 *Características clave:*\n"
+        "- Duración extendida (30 min máximo)\n"
+        "- Take Profit dinámico (1.5% mínimo)\n"
+        "- Filtros de entrada más estrictos\n"
+        "- Rotación inteligente entre pares\n\n"
         "📌 *Comandos principales:*\n"
-        "- 🚀 Iniciar: Activa el trading (máx 2 operaciones)\n"
+        "- 🚀 Iniciar: Activa el trading\n"
         "- ⛔ Detener: Pausa nuevas operaciones\n"
-        "- 💰 Saldo: Muestra tu balance actual\n"
-        "- 📊 Operaciones: Muestra trades activos con P&L\n\n"
-        "⚠️ *Aviso importante:* Con saldos pequeños:\n"
-        "- Los spreads afectan más tu rentabilidad\n"
-        "- Algunos pares pueden no estar disponibles\n"
-        "- Considera depositar más fondos cuando puedas",
+        "- 💰 Saldo: Muestra tu balance\n"
+        "- 📊 Operaciones: Trades activos\n\n"
+        "⚠️ *Aviso:* El bot ahora evita cierres prematuros",
         reply_markup=crear_teclado(),
         parse_mode="Markdown"
     )
@@ -455,13 +558,12 @@ async def comandos(msg: types.Message):
         if not bot_activo:
             bot_activo = True
             asyncio.create_task(ciclo_trading())
-            saldo = await obtener_saldo()
             await msg.answer(
                 "✅ *Bot de trading ACTIVADO* ✅\n\n"
-                f"• Saldo disponible: `{saldo:.2f} USDT`\n"
-                f"• Monto por operación: `{(saldo * CONFIG['uso_saldo']) / CONFIG['max_operaciones']:.2f} USDT`\n"
-                f"• Máx. operaciones simultáneas: `{CONFIG['max_operaciones']}`\n\n"
-                "_Buscando oportunidades..._",
+                "🔍 Iniciando análisis con protección contra cierres prematuros...\n"
+                f"⏳ Duración máxima por operación: `{CONFIG['max_duracion_minutos']} min`\n"
+                f"🎯 Objetivo de ganancia mínimo: `{CONFIG['min_ganancia_objetivo']*100:.1f}%`\n\n"
+                "_Buscando oportunidades de calidad..._",
                 parse_mode="Markdown"
             )
         else:
@@ -474,7 +576,7 @@ async def comandos(msg: types.Message):
                 "🔴 *Bot de trading DETENIDO* 🔴\n\n"
                 "🛑 No se realizarán nuevas operaciones.\n"
                 f"📉 Operaciones activas: `{len(operaciones_activas)}`\n\n"
-                "_Los trailing stops seguirán activos._",
+                "_Los trailing stops seguirán activos hasta su cierre natural._",
                 parse_mode="Markdown"
             )
         else:
@@ -491,7 +593,7 @@ async def comandos(msg: types.Message):
             f"• 📊 Invertido: `{invertido:.2f} USDT`\n"
             f"• 🏦 Total: `{saldo_total:.2f} USDT`\n"
             f"• 📈 Operaciones activas: `{len(operaciones_activas)}`\n\n"
-            f"💡 _Consejo: Para mejor rendimiento, considera llegar a al menos $100 USDT_",
+            f"💡 _Configuración actual: {CONFIG['uso_saldo']*100:.0f}% del saldo en {CONFIG['max_operaciones']} operaciones_",
             parse_mode="Markdown"
         )
 
@@ -519,7 +621,8 @@ async def comandos(msg: types.Message):
                         f"• 📈 Actual: `{precio_actual:.8f}`\n"
                         f"• 📊 Rentabilidad: `{ganancia_pct:.2f}%`\n"
                         f"• 💰 Ganancia: `{ganancia_usdt:.4f} USDT`\n"
-                        f"• ⏱ Duración: `{duracion:.1f} min`\n\n"
+                        f"• ⏱ Duración: `{duracion:.1f} min`\n"
+                        f"• 🕒 Tiempo restante: `{max(0, CONFIG['max_duracion_minutos'] - duracion):.1f} min`\n\n"
                     )
                 except Exception as e:
                     logger.error(f"Error obteniendo datos para {op['par']}: {e}")
@@ -535,7 +638,7 @@ async def comandos(msg: types.Message):
                 parse_mode="Markdown"
             )
         else:
-            ultimas_operaciones = sorted(historial_operaciones, key=lambda x: x['salida_dt'], reverse=True)[:3]
+            ultimas_operaciones = sorted(historial_operaciones, key=lambda x: x['salida_dt'], reverse=True)[:5]
             
             texto = "📈 *Últimas Operaciones* 📈\n\n"
             total_ganado = 0
@@ -549,20 +652,20 @@ async def comandos(msg: types.Message):
                 
                 razones = {
                     "timeout": "⏰ Timeout",
-                    "take_profit_1x": "🎯 TP 0.8%",
-                    "take_profit_1.5x": "🎯 TP 1.2%",
-                    "take_profit_2x": "🎯 TP 1.8%",
-                    "spread_alto": "📉 Spread alto"
+                    "take_profit": "🎯 Take Profit",
+                    "take_profit_parcial": "🎯 TP Parcial",
+                    "spread_excesivo": "📉 Spread Alto",
+                    "stop_loss": "🛑 Stop Loss"
                 }
                 
                 texto += (
                     f"{emoji} *{op['par']}* {emoji}\n"
                     f"• 🎯 Entrada: `{op['entrada']:.8f}`\n"
-                    f"• � Salida: `{op['salida']:.8f}`\n"
+                    f"• 🏁 Salida: `{op['salida']:.8f}`\n"
                     f"• 📊 Rentabilidad: `{op['rentabilidad_pct']:.2f}%`\n"
                     f"• 💰 Ganancia: `{op['ganancia_usdt']:.4f} USDT`\n"
                     f"• ⏱ Duración: `{op['duracion_min']:.1f} min`\n"
-                    f"• 🛑 Razón: `{razones.get(op['razon_salida'], op['razon_salida'])}`\n\n"
+                    f"• 🛑 Razón: `{razones.get(op['razon_salida'].split('_')[0], op['razon_salida'])}`\n\n"
                 )
             
             total_ops = len(historial_operaciones)
@@ -613,8 +716,10 @@ async def comandos(msg: types.Message):
             f"• 📈 Puntaje mínimo: `{CONFIG['puntaje_minimo']}`\n"
             f"• ⏱ Intervalo análisis: `{CONFIG['reanalisis_segundos']} seg`\n"
             f"• 🕒 Duración máxima: `{CONFIG['max_duracion_minutos']} min`\n"
-            f"• 📉 Spread máximo: `{CONFIG['spread_maximo']*100:.2f}%`\n\n"
-            f"_Configuración optimizada para saldo de ~$35 USDT_",
+            f"• 📉 Spread máximo: `{CONFIG['spread_maximo']*100:.2f}%`\n"
+            f"• 🎯 Ganancia mínima: `{CONFIG['min_ganancia_objetivo']*100:.1f}%`\n"
+            f"• 🛑 Stop loss: `{CONFIG['nivel_proteccion']*100:.1f}%`\n\n"
+            f"_Configuración optimizada para evitar cierres prematuros_",
             parse_mode="Markdown"
         )
 
@@ -626,7 +731,7 @@ async def iniciar_bot():
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    logger.info("Iniciando KuCoin Low Balance Trading Bot")
+    logger.info("Iniciando KuCoin Anti-Premature Bot")
     try:
         asyncio.run(iniciar_bot())
     except KeyboardInterrupt:
