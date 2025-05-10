@@ -650,7 +650,7 @@ async def register_handlers(dp: Dispatcher):
             await callback.answer("⚠ Error obteniendo operaciones", show_alert=True)
 
 # =================================================================
-# CICLO PRINCIPAL Y EJECUCIÓN (Mejoras finales - SIN CAMBIOS)
+# CICLO PRINCIPAL Y EJECUCIÓN (CORRECCIÓN APLICADA AQUÍ)
 # =================================================================
 
 async def ciclo_trading():
@@ -690,35 +690,35 @@ async def ciclo_trading():
 
 async def ejecutar_bot():
     logger.info("=== INICIANDO BOT ===")
+    global bot
+    bot = Bot(os.getenv("TELEGRAM_TOKEN"))
+    dp = Dispatcher()
+    
     try:
-        async with Bot(os.getenv("TELEGRAM_TOKEN")) as bot_instance:
-            global bot
-            bot = bot_instance
+        await register_handlers(dp)
+        
+        if not await verificar_conexion_kucoin():
+            logger.error("Error de conexión inicial con KuCoin")
+            return
             
-            dp = Dispatcher()
-            await register_handlers(dp)
+        try:
+            if os.path.exists('historial_operaciones.json') and os.path.getsize('historial_operaciones.json') > 0:
+                with open('historial_operaciones.json', 'r') as f:
+                    estado.historial = json.load(f)
+                logger.info(f"Historial cargado ({len(estado.historial)} ops)")
+            else:
+                logger.info("Sin historial previo o archivo vacío")
+        except Exception as e:
+            logger.error(f"Error cargando historial: {e}")
             
-            if not await verificar_conexion_kucoin():
-                logger.error("Error de conexión inicial con KuCoin")
-                return
-                
-            try:
-                if os.path.exists('historial_operaciones.json') and os.path.getsize('historial_operaciones.json') > 0:
-                    with open('historial_operaciones.json', 'r') as f:
-                        estado.historial = json.load(f)
-                    logger.info(f"Historial cargado ({len(estado.historial)} ops)")
-                else:
-                    logger.info("Sin historial previo o archivo vacío")
-            except Exception as e:
-                logger.error(f"Error cargando historial: {e}")
-                
-            await dp.start_polling(bot)
-            
+        await dp.start_polling()
+        
     except Exception as e:
         logger.critical(f"Error fatal: {e}")
     finally:
         estado.activo = False
         await guardar_historial()
+        await bot.close()
         logger.info("Bot detenido correctamente")
 
 if __name__ == "__main__":
