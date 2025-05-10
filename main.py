@@ -650,7 +650,7 @@ async def register_handlers(dp: Dispatcher):
             await callback.answer("⚠ Error obteniendo operaciones", show_alert=True)
 
 # =================================================================
-# CICLO PRINCIPAL Y EJECUCIÓN (CORRECCIÓN APLICADA AQUÍ)
+# CICLO PRINCIPAL Y EJECUCIÓN (CORRECCIÓN FINAL APLICADA)
 # =================================================================
 
 async def ciclo_trading():
@@ -692,7 +692,7 @@ async def ejecutar_bot():
     logger.info("=== INICIANDO BOT ===")
     global bot
     bot = Bot(token=os.getenv("TELEGRAM_TOKEN"))
-    dp = Dispatcher(bot=bot)
+    dp = Dispatcher()  # 1. Dispatcher sin parámetro
     
     try:
         await register_handlers(dp)
@@ -711,7 +711,7 @@ async def ejecutar_bot():
         except Exception as e:
             logger.error(f"Error cargando historial: {e}")
             
-        await dp.start_polling()
+        await dp.start_polling(bot)  # 2. Pasamos el bot como parámetro
         
     except Exception as e:
         logger.critical(f"Error fatal: {e}")
