@@ -22,7 +22,7 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
-logger = logging.getLogger("KuCoinImpulsePro")
+logger = logging.getLogger("KuCoinLowBalanceBot")
 
 # Configuración de entorno
 API_KEY = os.getenv("API_KEY")
@@ -38,38 +38,31 @@ user = User(key=API_KEY, secret=SECRET_KEY, passphrase=API_PASSPHRASE)
 bot = Bot(token=TELEGRAM_TOKEN)
 dp = Dispatcher()
 
-# Pares y configuración
+# Pares optimizados para saldos pequeños (~$35)
 PARES = [
-    "SHIB-USDT", "PEPE-USDT", "FLOKI-USDT", "DOGE-USDT", "TRUMP-USDT",
-    "SUI-USDT", "TURBO-USDT", "BONK-USDT", "KAS-USDT", "WIF-USDT",
-    "ADA-USDT", "AVAX-USDT", "XRP-USDT", "MATIC-USDT", "OP-USDT"
+    "SHIB-USDT", "PEPE-USDT", "FLOKI-USDT", "DOGE-USDT",
+    "SUI-USDT", "TURBO-USDT", "BONK-USDT"
 ]
 
+# Configuración ajustada para saldos pequeños
 PARES_CONFIG = {
-    "SHIB-USDT": {"inc": 1000, "min": 100000, "volatilidad": 1.8},
-    "PEPE-USDT": {"inc": 100, "min": 10000, "volatilidad": 2.0},
-    "FLOKI-USDT": {"inc": 100, "min": 10000, "volatilidad": 1.9},
-    "DOGE-USDT": {"inc": 1, "min": 10, "volatilidad": 1.5},
-    "TRUMP-USDT": {"inc": 1, "min": 1, "volatilidad": 2.5},
-    "SUI-USDT": {"inc": 0.01, "min": 0.1, "volatilidad": 1.3},
-    "TURBO-USDT": {"inc": 100, "min": 10000, "volatilidad": 2.2},
-    "BONK-USDT": {"inc": 1000, "min": 100000, "volatilidad": 2.1},
-    "KAS-USDT": {"inc": 0.001, "min": 0.1, "volatilidad": 1.4},
-    "WIF-USDT": {"inc": 0.0001, "min": 0.01, "volatilidad": 2.3},
-    "ADA-USDT": {"inc": 0.1, "min": 10, "volatilidad": 1.2},
-    "AVAX-USDT": {"inc": 0.001, "min": 0.1, "volatilidad": 1.3},
-    "XRP-USDT": {"inc": 0.1, "min": 10, "volatilidad": 1.1},
-    "MATIC-USDT": {"inc": 0.1, "min": 10, "volatilidad": 1.2},
-    "OP-USDT": {"inc": 0.01, "min": 1, "volatilidad": 1.4}
+    "SHIB-USDT": {"inc": 1000, "min": 50000, "volatilidad": 1.8},
+    "PEPE-USDT": {"inc": 100, "min": 5000, "volatilidad": 2.0},
+    "FLOKI-USDT": {"inc": 100, "min": 5000, "volatilidad": 1.9},
+    "DOGE-USDT": {"inc": 1, "min": 5, "volatilidad": 1.5},
+    "SUI-USDT": {"inc": 0.01, "min": 0.05, "volatilidad": 1.3},
+    "TURBO-USDT": {"inc": 100, "min": 5000, "volatilidad": 2.2},
+    "BONK-USDT": {"inc": 1000, "min": 50000, "volatilidad": 2.1}
 }
 
 CONFIG = {
-    "uso_saldo": 0.80,
-    "max_operaciones": 3,
-    "puntaje_minimo": 2.5,
-    "reanalisis_segundos": 8,
-    "max_duracion_minutos": 6,
-    "spread_maximo": 0.002  # 0.2%
+    "uso_saldo": 0.90,           # Usamos el 90% del saldo disponible
+    "max_operaciones": 2,        # Máximo 2 operaciones simultáneas
+    "puntaje_minimo": 2.0,       # Puntaje mínimo más flexible
+    "reanalisis_segundos": 10,   # Intervalo de análisis más largo
+    "max_duracion_minutos": 5,   # Duración máxima reducida
+    "spread_maximo": 0.0025,     # Spread máximo permitido (0.25%)
+    "saldo_minimo": 5.00         # Mínimo USDT requerido por operación
 }
 
 # Variables globales
@@ -94,12 +87,22 @@ async def guardar_historial():
         logger.error(f"Error guardando historial: {e}")
 
 async def obtener_saldo():
-    """Obtiene el saldo disponible en USDT"""
+    """Obtiene el saldo disponible en USDT con verificación de mínimo"""
     try:
         cuentas = user.get_account_list()
         usdt = next(c for c in cuentas if c["currency"] == "USDT" and c["type"] == "trade")
         saldo = float(usdt["balance"])
         logger.info(f"Saldo obtenido: {saldo:.2f} USDT")
+        
+        if saldo < CONFIG["saldo_minimo"]:
+            await bot.send_message(
+                CHAT_ID,
+                f"⚠️ *SALDO MUY BAJO* ⚠️\n\n"
+                f"Saldo actual: `{saldo:.2f} USDT`\n"
+                f"Mínimo recomendado: `{CONFIG['saldo_minimo']:.2f} USDT`\n\n"
+                f"_Deposita más fondos para operar adecuadamente._",
+                parse_mode="Markdown"
+            )
         return saldo
     except Exception as e:
         logger.error(f"Error obteniendo saldo: {e}")
@@ -110,25 +113,27 @@ async def analizar_impulso(par):
     """Analiza el impulso del mercado para un par específico"""
     try:
         # Obtener datos de mercado
-        velas = market.get_kline(symbol=par, kline_type="1min", limit=5)
+        velas = market.get_kline(symbol=par, kline_type="1min", limit=4)
+        if not velas or len(velas) < 4:
+            return None
+            
         precios = [float(v[2]) for v in velas]  # Precios de cierre
         volumen_24h = float(market.get_24h_stats(par)["volValue"])
-        spread_actual = (float(market.get_ticker(par)["bestAsk"]) - float(market.get_ticker(par)["bestBid"])) / float(market.get_ticker(par)["bestAsk"])
+        ticker = market.get_ticker(par)
+        spread_actual = (float(ticker["bestAsk"]) - float(ticker["bestBid"])) / float(ticker["bestAsk"])
         
-        # Análisis técnico mejorado
-        velas_positivas = sum(1 for i in range(1, len(precios)) if precios[i] > precios[i-1] * 1.001)
-        momentum_corto = (precios[-1] - precios[-2]) / precios[-2]
-        momentum_largo = (precios[-1] - precios[-3]) / precios[-3]
+        # Análisis técnico para saldos pequeños
+        velas_positivas = sum(1 for i in range(1, len(precios)) if precios[i] > precios[i-1] * 1.0015)  # Subida > 0.15%
+        momentum = (precios[-1] - precios[-3]) / precios[-3]  # Momentum de 3 velas
         volatilidad = PARES_CONFIG[par].get("volatilidad", 1.5)
         
-        # Cálculo de puntaje mejorado
+        # Cálculo de puntaje ajustado
         puntaje = (
-            (velas_positivas * 0.4) + 
-            (momentum_corto * 1.5) + 
-            (momentum_largo * 1.0) + 
-            (volumen_24h / 3_000_000) + 
-            (volatilidad * 0.8) -
-            (spread_actual * 500)  # Penaliza spreads altos
+            (velas_positivas * 0.5) + 
+            (momentum * 2.0) + 
+            (min(volumen_24h, 2_000_000) / 1_500_000) +  # Cap volumen a 2M
+            (volatilidad * 0.7) -
+            (spread_actual * 400)  # Penaliza spreads altos
         )
         
         return {
@@ -136,16 +141,21 @@ async def analizar_impulso(par):
             "precio": precios[-1],
             "puntaje": puntaje,
             "volumen": volumen_24h,
-            "momentum": momentum_corto,
-            "spread": spread_actual
+            "spread": spread_actual,
+            "min_required": PARES_CONFIG[par]["min"] * precios[-1]  # Mínimo requerido en USDT
         }
     except Exception as e:
         logger.error(f"Error analizando {par}: {e}")
         return None
 
 async def ejecutar_compra(par, precio, monto_usdt):
-    """Ejecuta una orden de compra con gestión de riesgo"""
+    """Ejecuta una orden de compra con validación para saldos pequeños"""
     try:
+        config_par = PARES_CONFIG.get(par)
+        if not config_par:
+            logger.error(f"Configuración no encontrada para {par}")
+            return False
+
         # Verificar spread primero
         ticker = market.get_ticker(par)
         spread = (float(ticker["bestAsk"]) - float(ticker["bestBid"])) / float(ticker["bestAsk"])
@@ -154,12 +164,23 @@ async def ejecutar_compra(par, precio, monto_usdt):
             return False
 
         # Calcular tamaño de orden
-        inc = Decimal(str(PARES_CONFIG[par]["inc"]))
-        minsize = Decimal(str(PARES_CONFIG[par]["min"]))
+        inc = Decimal(str(config_par["inc"]))
+        minsize = Decimal(str(config_par["min"]))
         size = (Decimal(monto_usdt) / Decimal(precio)).quantize(inc)
         
-        if size < minsize:
-            logger.warning(f"Tamaño {size} < mínimo {minsize} para {par}")
+        # Verificar mínimo requerido
+        min_required = float(minsize) * precio
+        if monto_usdt < min_required:
+            logger.warning(f"Saldo insuficiente para {par}. Necesitas {min_required:.2f} USDT, tienes {monto_usdt:.2f}")
+            await bot.send_message(
+                CHAT_ID,
+                f"⚠️ *SALDO INSUFICIENTE* ⚠️\n\n"
+                f"• Par: `{par}`\n"
+                f"• Mínimo requerido: `{min_required:.2f} USDT`\n"
+                f"• Saldo asignado: `{monto_usdt:.2f} USDT`\n\n"
+                f"_Considera depositar más fondos o elegir otro par._",
+                parse_mode="Markdown"
+            )
             return False
 
         # Ejecutar orden
@@ -189,6 +210,7 @@ async def ejecutar_compra(par, precio, monto_usdt):
             f"• Precio: `{precio:.8f}`\n"
             f"• Monto: `{monto_usdt:.2f} USDT`\n"
             f"• Cantidad: `{float(size):.2f}`\n"
+            f"• Mínimo requerido: `{min_required:.2f} USDT`\n"
             f"• Spread inicial: `{spread*100:.2f}%`\n"
             f"• Hora: `{datetime.now().strftime('%H:%M:%S')}`\n\n"
             f"📊 _Iniciando trailing stop..._",
@@ -212,7 +234,7 @@ async def ejecutar_compra(par, precio, monto_usdt):
         return False
 
 async def trailing_stop(op):
-    """Gestión profesional de trailing stop dinámico"""
+    """Trailing stop optimizado para saldos pequeños"""
     par = op["par"]
     entrada_dt = datetime.fromisoformat(op["entrada_dt"])
     max_duracion = timedelta(minutes=CONFIG["max_duracion_minutos"])
@@ -229,6 +251,7 @@ async def trailing_stop(op):
             # Obtener precio actual
             ticker = market.get_ticker(par)
             precio_actual = float(ticker["price"])
+            spread_actual = (float(ticker["bestAsk"]) - float(ticker["bestBid"])) / float(ticker["bestAsk"])
             
             # Actualizar máximo
             if precio_actual > op["maximo"]:
@@ -237,19 +260,18 @@ async def trailing_stop(op):
             # Calcular métricas
             ganancia_pct = (precio_actual - op["entrada"]) / op["entrada"] * 100
             retroceso_pct = (op["maximo"] - precio_actual) / op["maximo"] * 100
-            spread_actual = (float(ticker["bestAsk"]) - float(ticker["bestBid"])) / float(ticker["bestAsk"])
             
-            # Condiciones de salida dinámicas
-            if ganancia_pct >= 2.0 * volatilidad and retroceso_pct >= 1.0 * volatilidad:
+            # Condiciones de salida ajustadas para saldos pequeños
+            if ganancia_pct >= 1.8 * volatilidad and retroceso_pct >= 1.0 * volatilidad:
                 await ejecutar_venta(op, "take_profit_2x")
                 break
-            elif ganancia_pct >= 1.5 * volatilidad and retroceso_pct >= 0.8 * volatilidad:
+            elif ganancia_pct >= 1.2 * volatilidad and retroceso_pct >= 0.7 * volatilidad:
                 await ejecutar_venta(op, "take_profit_1.5x")
                 break
-            elif ganancia_pct >= 1.0 * volatilidad and retroceso_pct >= 0.5 * volatilidad:
+            elif ganancia_pct >= 0.8 * volatilidad and retroceso_pct >= 0.4 * volatilidad:
                 await ejecutar_venta(op, "take_profit_1x")
                 break
-            elif spread_actual > CONFIG["spread_maximo"] * 2:  # Spread se duplica
+            elif spread_actual > CONFIG["spread_maximo"] * 1.5:  # Spread aumenta 50%
                 await ejecutar_venta(op, "spread_alto")
                 break
                 
@@ -295,9 +317,9 @@ async def ejecutar_venta(op, razon):
         # Preparar mensaje
         razones = {
             "timeout": "⏰ Tiempo máximo alcanzado",
-            "take_profit_1x": "🎯 Take Profit 1X",
-            "take_profit_1.5x": "🎯 Take Profit 1.5X",
-            "take_profit_2x": "🎯 Take Profit 2X",
+            "take_profit_1x": "🎯 Take Profit 1X (0.8%)",
+            "take_profit_1.5x": "🎯 Take Profit 1.5X (1.2%)",
+            "take_profit_2x": "🎯 Take Profit 2X (1.8%)",
             "spread_alto": "📉 Spread demasiado alto"
         }
         
@@ -330,8 +352,8 @@ async def ejecutar_venta(op, razon):
         )
 
 async def ciclo_trading():
-    """Ciclo principal de trading"""
-    await asyncio.sleep(60)  # Espera inicial para evitar operar al inicio
+    """Ciclo principal de trading optimizado para saldos pequeños"""
+    await asyncio.sleep(10)  # Espera inicial más corta
     
     while bot_activo:
         try:
@@ -343,22 +365,15 @@ async def ciclo_trading():
                     
                 # Obtener saldo
                 saldo = await obtener_saldo()
-                if saldo <= 10:  # Mínimo 10 USDT para operar
-                    await bot.send_message(
-                        CHAT_ID,
-                        f"⚠️ *SALDO INSUFICIENTE*\n\n"
-                        f"Saldo disponible: `{saldo:.2f} USDT`\n"
-                        f"Mínimo requerido: `10.00 USDT`",
-                        parse_mode="Markdown"
-                    )
-                    await asyncio.sleep(60)
+                if saldo < CONFIG["saldo_minimo"]:
+                    await asyncio.sleep(30)  # Espera más larga si saldo es muy bajo
                     continue
                     
                 # Calcular monto por operación
-                ops_disponibles = CONFIG["max_operaciones"] - len(operaciones_activas)
+                ops_disponibles = max(1, CONFIG["max_operaciones"] - len(operaciones_activas))
                 monto_por_op = (saldo * CONFIG["uso_saldo"]) / ops_disponibles
                 
-                # Analizar pares
+                # Analizar pares disponibles
                 ya_usados = [op["par"] for op in operaciones_activas]
                 candidatos = []
                 
@@ -368,18 +383,21 @@ async def ciclo_trading():
                         
                     analisis = await analizar_impulso(par)
                     if analisis and analisis["puntaje"] >= CONFIG["puntaje_minimo"]:
-                        candidatos.append(analisis)
+                        # Verificar que tenemos suficiente saldo para este par
+                        if monto_por_op >= analisis["min_required"] * 1.1:  # 10% de margen
+                            candidatos.append(analisis)
                 
                 if not candidatos:
                     await asyncio.sleep(CONFIG["reanalisis_segundos"])
                     continue
                 
-                # Seleccionar mejor oportunidad
+                # Seleccionar mejor oportunidad con saldo suficiente
                 mejor = max(candidatos, key=lambda x: x["puntaje"])
                 
-                # Ejecutar compra
-                if not await ejecutar_compra(mejor["par"], mejor["precio"], monto_por_op):
-                    await asyncio.sleep(3)
+                # Ejecutar compra si tenemos saldo suficiente
+                if monto_por_op >= mejor["min_required"]:
+                    if not await ejecutar_compra(mejor["par"], mejor["precio"], monto_por_op):
+                        await asyncio.sleep(3)
                 
             await asyncio.sleep(CONFIG["reanalisis_segundos"])
             
@@ -389,10 +407,10 @@ async def ciclo_trading():
                 CHAT_ID,
                 f"⚠️ *ERROR EN CICLO TRADING* ⚠️\n\n"
                 f"`{str(e)}`\n\n"
-                f"_Reintentando en 10 segundos..._",
+                f"_Reintentando en 15 segundos..._",
                 parse_mode="Markdown"
             )
-            await asyncio.sleep(10)
+            await asyncio.sleep(15)
 
 def crear_teclado():
     """Crea el teclado interactivo de Telegram"""
@@ -409,22 +427,21 @@ def crear_teclado():
 
 @dp.message(Command("start", "help"))
 async def start_cmd(msg: types.Message):
-    """Mensaje de inicio/ayuda"""
+    """Mensaje de inicio/ayuda optimizado"""
     await msg.answer(
-        "🤖 *Bot de Trading Profesional KuCoin* 🤖\n\n"
-        "🔹 *Estrategia:* Trading de impulso con trailing stop dinámico\n"
-        "🔹 *Pares:* 15 principales criptomonedas\n"
-        "🔹 *Gestión de riesgo:* Stop dinámico basado en volatilidad\n\n"
-        "📌 *Comandos disponibles:*\n"
-        "- 🚀 Iniciar Bot: Activa el sistema de trading\n"
-        "- ⛔ Detener Bot: Pausa nuevas operaciones\n"
-        "- 💰 Saldo USDT: Muestra tu balance disponible\n"
-        "- 📊 Operaciones Activas: Trades abiertos con P&L\n"
-        "- 📈 Historial Operaciones: Últimos trades cerrados\n"
-        "- 📉 Rendimiento Diario: Resumen de ganancias/pérdidas\n"
-        "- ⚙️ Configuración: Parámetros actuales del bot\n\n"
-        "⚠️ *Aviso de riesgo:* El trading conlleva pérdidas potenciales. "
-        "Este bot no garantiza ganancias y debe usarse con prudencia.",
+        "🤖 *Bot de Trading KuCoin - Versión Saldo Pequeño* 🤖\n\n"
+        "🔹 *Saldo actual:* ~$35 USDT\n"
+        "🔹 *Pares disponibles:* 7 (optimizados para bajo capital)\n"
+        "🔹 *Estrategia:* Impulso con gestión de riesgo ajustada\n\n"
+        "📌 *Comandos principales:*\n"
+        "- 🚀 Iniciar: Activa el trading (máx 2 operaciones)\n"
+        "- ⛔ Detener: Pausa nuevas operaciones\n"
+        "- 💰 Saldo: Muestra tu balance actual\n"
+        "- 📊 Operaciones: Muestra trades activos con P&L\n\n"
+        "⚠️ *Aviso importante:* Con saldos pequeños:\n"
+        "- Los spreads afectan más tu rentabilidad\n"
+        "- Algunos pares pueden no estar disponibles\n"
+        "- Considera depositar más fondos cuando puedas",
         reply_markup=crear_teclado(),
         parse_mode="Markdown"
     )
@@ -438,18 +455,17 @@ async def comandos(msg: types.Message):
         if not bot_activo:
             bot_activo = True
             asyncio.create_task(ciclo_trading())
+            saldo = await obtener_saldo()
             await msg.answer(
                 "✅ *Bot de trading ACTIVADO* ✅\n\n"
-                "🔍 Iniciando análisis de mercado...\n"
-                "📊 Máximo de operaciones simultáneas: "
-                f"`{CONFIG['max_operaciones']}`\n"
-                "💰 % Saldo utilizado: "
-                f"`{CONFIG['uso_saldo']*100:.0f}%`\n\n"
-                "_Las operaciones comenzarán en breve..._",
+                f"• Saldo disponible: `{saldo:.2f} USDT`\n"
+                f"• Monto por operación: `{(saldo * CONFIG['uso_saldo']) / CONFIG['max_operaciones']:.2f} USDT`\n"
+                f"• Máx. operaciones simultáneas: `{CONFIG['max_operaciones']}`\n\n"
+                "_Buscando oportunidades..._",
                 parse_mode="Markdown"
             )
         else:
-            await msg.answer("⚠️ El bot ya está en funcionamiento")
+            await msg.answer("ℹ️ El bot ya está en funcionamiento")
 
     elif msg.text == "⛔ Detener Bot Trading":
         if bot_activo:
@@ -457,8 +473,8 @@ async def comandos(msg: types.Message):
             await msg.answer(
                 "🔴 *Bot de trading DETENIDO* 🔴\n\n"
                 "🛑 No se realizarán nuevas operaciones.\n"
-                "📉 Las operaciones activas continuarán con su trailing stop.\n\n"
-                f"ℹ️ Operaciones activas actuales: `{len(operaciones_activas)}`",
+                f"📉 Operaciones activas: `{len(operaciones_activas)}`\n\n"
+                "_Los trailing stops seguirán activos._",
                 parse_mode="Markdown"
             )
         else:
@@ -470,33 +486,40 @@ async def comandos(msg: types.Message):
         saldo_total = saldo + invertido
         
         await msg.answer(
-            f"💵 *Balance KuCoin* 💵\n\n"
-            f"• 💰 Saldo disponible: `{saldo:.2f} USDT`\n"
-            f"• 📊 Invertido en operaciones: `{invertido:.2f} USDT`\n"
-            f"• 🏦 Balance total estimado: `{saldo_total:.2f} USDT`\n\n"
-            f"ℹ️ Operaciones activas: `{len(operaciones_activas)}`",
+            f"💵 *Balance Actual* 💵\n\n"
+            f"• 💰 Disponible: `{saldo:.2f} USDT`\n"
+            f"• 📊 Invertido: `{invertido:.2f} USDT`\n"
+            f"• 🏦 Total: `{saldo_total:.2f} USDT`\n"
+            f"• 📈 Operaciones activas: `{len(operaciones_activas)}`\n\n"
+            f"💡 _Consejo: Para mejor rendimiento, considera llegar a al menos $100 USDT_",
             parse_mode="Markdown"
         )
 
     elif msg.text == "📊 Operaciones Activas":
         if not operaciones_activas:
-            await msg.answer("🟢 *No hay operaciones activas* 🟢\n\n_El bot está esperando oportunidades..._", parse_mode="Markdown")
+            await msg.answer(
+                "🟢 *Sin operaciones activas* 🟢\n\n"
+                "_El bot está analizando el mercado..._",
+                parse_mode="Markdown"
+            )
         else:
-            texto = "📊 *Operaciones Activas* 📊\n\n"
+            texto = "📊 *Operaciones en Curso* 📊\n\n"
             for op in operaciones_activas:
                 try:
                     ticker = market.get_ticker(op['par'])
                     precio_actual = float(ticker["price"])
                     ganancia_pct = (precio_actual - op['entrada']) / op['entrada'] * 100
+                    ganancia_usdt = (precio_actual - op['entrada']) * op['cantidad']
                     emoji = "🟢" if ganancia_pct >= 0 else "🔴"
+                    duracion = (datetime.now() - datetime.fromisoformat(op['entrada_dt'])).total_seconds() / 60
                     
                     texto += (
                         f"{emoji} *{op['par']}* {emoji}\n"
                         f"• 🎯 Entrada: `{op['entrada']:.8f}`\n"
-                        f"• 📈 Precio actual: `{precio_actual:.8f}`\n"
-                        f"• 💰 Ganancia: `{ganancia_pct:.2f}%`\n"
-                        f"• 📦 Cantidad: `{op['cantidad']:.2f}`\n"
-                        f"• ⏰ Hora entrada: `{datetime.fromisoformat(op['entrada_dt']).strftime('%H:%M:%S')}`\n\n"
+                        f"• 📈 Actual: `{precio_actual:.8f}`\n"
+                        f"• 📊 Rentabilidad: `{ganancia_pct:.2f}%`\n"
+                        f"• 💰 Ganancia: `{ganancia_usdt:.4f} USDT`\n"
+                        f"• ⏱ Duración: `{duracion:.1f} min`\n\n"
                     )
                 except Exception as e:
                     logger.error(f"Error obteniendo datos para {op['par']}: {e}")
@@ -506,10 +529,13 @@ async def comandos(msg: types.Message):
 
     elif msg.text == "📈 Historial Operaciones":
         if not historial_operaciones:
-            await msg.answer("📭 *No hay historial de operaciones* 📭\n\n_El bot aún no ha completado ninguna operación._", parse_mode="Markdown")
+            await msg.answer(
+                "📭 *Historial vacío* 📭\n\n"
+                "_Aún no se han completado operaciones._",
+                parse_mode="Markdown"
+            )
         else:
-            # Mostrar las últimas 5 operaciones
-            ultimas_operaciones = sorted(historial_operaciones, key=lambda x: x['salida_dt'], reverse=True)[:5]
+            ultimas_operaciones = sorted(historial_operaciones, key=lambda x: x['salida_dt'], reverse=True)[:3]
             
             texto = "📈 *Últimas Operaciones* 📈\n\n"
             total_ganado = 0
@@ -523,32 +549,31 @@ async def comandos(msg: types.Message):
                 
                 razones = {
                     "timeout": "⏰ Timeout",
-                    "take_profit_1x": "🎯 TP 1X",
-                    "take_profit_1.5x": "🎯 TP 1.5X",
-                    "take_profit_2x": "🎯 TP 2X",
+                    "take_profit_1x": "🎯 TP 0.8%",
+                    "take_profit_1.5x": "🎯 TP 1.2%",
+                    "take_profit_2x": "🎯 TP 1.8%",
                     "spread_alto": "📉 Spread alto"
                 }
                 
                 texto += (
                     f"{emoji} *{op['par']}* {emoji}\n"
                     f"• 🎯 Entrada: `{op['entrada']:.8f}`\n"
-                    f"• 🏁 Salida: `{op['salida']:.8f}`\n"
-                    f"• 💰 Ganancia: `{op['ganancia_usdt']:.4f} USDT`\n"
+                    f"• � Salida: `{op['salida']:.8f}`\n"
                     f"• 📊 Rentabilidad: `{op['rentabilidad_pct']:.2f}%`\n"
+                    f"• 💰 Ganancia: `{op['ganancia_usdt']:.4f} USDT`\n"
                     f"• ⏱ Duración: `{op['duracion_min']:.1f} min`\n"
                     f"• 🛑 Razón: `{razones.get(op['razon_salida'], op['razon_salida'])}`\n\n"
                 )
             
-            # Estadísticas
             total_ops = len(historial_operaciones)
             porcentaje_exito = (ops_positivas / total_ops * 100) if total_ops > 0 else 0
             
             texto += (
-                "📊 *Estadísticas Generales* 📊\n"
+                "📊 *Estadísticas* 📊\n"
                 f"• 📅 Total operaciones: `{total_ops}`\n"
                 f"• ✅ Operaciones positivas: `{ops_positivas}` (`{porcentaje_exito:.1f}%`)\n"
                 f"• 💵 Ganancia total: `{total_ganado:.4f} USDT`\n"
-                f"• 📌 Promedio por op: `{(total_ganado/total_ops):.4f} USDT`" if total_ops > 0 else ""
+                f"• 📌 Promedio/op: `{(total_ganado/total_ops):.4f} USDT`" if total_ops > 0 else ""
             )
             
             await msg.answer(texto, parse_mode="Markdown")
@@ -570,11 +595,11 @@ async def comandos(msg: types.Message):
             
             await msg.answer(
                 f"📅 *Rendimiento {hoy.strftime('%d/%m/%Y')}* 📅\n\n"
-                f"• 📊 Operaciones totales: `{len(ops_hoy)}`\n"
-                f"• ✅ Operaciones positivas: `{ops_positivas}` (`{ops_positivas/len(ops_hoy)*100:.1f}%`)\n"
-                f"• 💰 Ganancia total: `{ganancia_total:.4f} USDT`\n"
-                f"• 📌 Promedio por op: `{ganancia_total/len(ops_hoy):.4f} USDT`\n\n"
-                f"📈 _Evolución del día:_\n"
+                f"• 📊 Operaciones: `{len(ops_hoy)}`\n"
+                f"• ✅ Positivas: `{ops_positivas}` (`{ops_positivas/len(ops_hoy)*100:.1f}%`)\n"
+                f"• 💰 Ganancia: `{ganancia_total:.4f} USDT`\n"
+                f"• 📌 Promedio: `{ganancia_total/len(ops_hoy):.4f} USDT`\n\n"
+                f"📈 _Resumen:_\n"
                 f"`{'🟢' * ops_positivas}{'🔴' * (len(ops_hoy) - ops_positivas)}`",
                 parse_mode="Markdown"
             )
@@ -589,7 +614,7 @@ async def comandos(msg: types.Message):
             f"• ⏱ Intervalo análisis: `{CONFIG['reanalisis_segundos']} seg`\n"
             f"• 🕒 Duración máxima: `{CONFIG['max_duracion_minutos']} min`\n"
             f"• 📉 Spread máximo: `{CONFIG['spread_maximo']*100:.2f}%`\n\n"
-            f"_Estos parámetros están optimizados para trading de impulso._",
+            f"_Configuración optimizada para saldo de ~$35 USDT_",
             parse_mode="Markdown"
         )
 
@@ -601,7 +626,7 @@ async def iniciar_bot():
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    logger.info("Iniciando KuCoin Impulse Pro Bot")
+    logger.info("Iniciando KuCoin Low Balance Trading Bot")
     try:
         asyncio.run(iniciar_bot())
     except KeyboardInterrupt:
