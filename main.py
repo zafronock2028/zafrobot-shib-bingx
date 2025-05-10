@@ -548,27 +548,27 @@ async def register_handlers(dp: Dispatcher):
         await message.answer("🛑 Bot detenido manualmente")
 
     @dp.callback_query(lambda c: c.data == "iniciar_bot")
-    async def iniciar_bot(callback: types.CallbackQuery):
-        try:
-            if estado.activo:
-                await callback.answer("⚠ Bot ya activo")
-                return
-                
-            if not await verificar_conexion_kucoin():
-                await callback.answer("⚠ Error de conexión")
-                return
-                
-            estado.activo = True
-            asyncio.create_task(ciclo_trading())
-            
-            await callback.message.edit_text(
-                "🚀 Bot ACTIVADO\n"
-                f"🔹 Pares activos: {len(PARES_CONFIG)}\n"
-                f"🔹 Saldo mínimo: {CONFIG['saldo_minimo']} USDT",
-                reply_markup=await crear_menu_principal()
-            )
-        except Exception as e:
-            logger.error(f"Error al iniciar bot: {e}")
+async def iniciar_bot(callback: types.CallbackQuery):
+    try:
+        if estado.activo:
+            await callback.answer("⚠️ Bot ya activo")
+            return
+
+        if not await verificar_conexion_kucoin():
+            await callback.answer("⚠️ Error de conexión")
+            return
+
+        estado.activo = True
+        asyncio.create_task(ciclo_trading())
+
+        await callback.message.edit_text(
+            "🚀 Bot ACTIVADO\n"
+            f"🔹 Pares activos: {len(PARES_CONFIG)}\n"
+            f"🔹 Saldo mínimo: {CONFIG['saldo_minimo']} USDT",
+            reply_markup=await crear_menu_principal()
+        )
+    except Exception as e:
+        logger.error(f"Error al iniciar bot: {e}")
 
     @dp.callback_query(lambda c: c.data == "detener_bot")
     async def detener_bot(callback: types.CallbackQuery):
