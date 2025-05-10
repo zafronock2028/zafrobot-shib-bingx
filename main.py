@@ -527,6 +527,10 @@ async def crear_menu_principal():
         ]
     ])
 
+# =================================================================
+# REGISTRO DE HANDLERS CORREGIDO
+# =================================================================
+
 async def register_handlers(dp: Dispatcher):
     @dp.message(Command("start"))
     async def comando_inicio(message: types.Message):
@@ -547,15 +551,16 @@ async def register_handlers(dp: Dispatcher):
         estado.activo = False
         await message.answer("🛑 Bot detenido manualmente")
 
-        @dp.callback_query(lambda c: c.data == "iniciar_bot")
+    # Handler corregido: mismo nivel que los demás
+    @dp.callback_query(lambda c: c.data == "iniciar_bot")
     async def iniciar_bot(callback: types.CallbackQuery):
         try:
             if estado.activo:
-                await callback.answer("⚠️ Bot ya activo")
+                await callback.answer("⚠ Bot ya activo")
                 return
 
             if not await verificar_conexion_kucoin():
-                await callback.answer("⚠️ Error de conexión")
+                await callback.answer("⚠ Error de conexión")
                 return
 
             estado.activo = True
