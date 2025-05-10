@@ -488,7 +488,7 @@ async def notificar_operacion(operacion, tipo):
                 f"📊 Cantidad: {operacion['cantidad']:.2f}\n"
                 f"💰 Precio: {operacion['precio_entrada']:.8f}\n"
                 f"🎯 TP: {operacion['take_profit']:.8f}\n"
-                f"🛑 SL: {operacion['stop_loss']:.8f}"
+                f"🛑 SL: {operacion['stop_loss']:.8f"
             )
         else:
             ganancia_pct = ((operacion["precio_salida"] - operacion["precio_entrada"]) / operacion["precio_entrada"]) * 100
@@ -658,6 +658,7 @@ async def ciclo_trading():
     asyncio.create_task(price_monitor.conectar_websocket())
     
     while estado.activo:
+        logger.info(f"Estado activo: {estado.activo}")
         try:
             if not await verificar_conexion_kucoin():
                 await asyncio.sleep(30)
@@ -667,6 +668,7 @@ async def ciclo_trading():
             
             async with estado.lock:
                 if len(estado.operaciones_activas) < CONFIG["max_operaciones"]:
+                    logger.info(f"Verificando pares. Activas: {len(estado.operaciones_activas)}")
                     for par in PARES_CONFIG:
                         if par in estado.pares_en_analisis:
                             continue
