@@ -2,18 +2,18 @@ import os
 import logging
 import asyncio
 import json
-import pandas as pd
-import numpy as np
 from datetime import datetime, timedelta
-from decimal import Decimal
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from kucoin.client import Trade, Market, User
 from dotenv import load_dotenv
 
 # Configuración inicial
 load_dotenv()
+
+# Inicialización crítica que faltaba
+bot = Bot(token=os.getenv("TELEGRAM_TOKEN"))
+dp = Dispatcher()
 
 # Logger profesional
 logging.basicConfig(
@@ -65,7 +65,54 @@ PARES_CONFIG = {
         "cooldown": 25,
         "max_ops_dia": 6
     },
-    # ... (config similar para otros pares)
+    "FLOKI-USDT": {
+        "inc": 100,
+        "min": 5000,
+        "vol_min": 700000,
+        "momentum_min": 0.009,
+        "cooldown": 30,
+        "max_ops_dia": 5
+    },
+    "DOGE-USDT": {
+        "inc": 1,
+        "min": 5,
+        "vol_min": 2000000,
+        "momentum_min": 0.005,
+        "cooldown": 15,
+        "max_ops_dia": 3
+    },
+    "SUI-USDT": {
+        "inc": 0.01,
+        "min": 0.05,
+        "vol_min": 1500000,
+        "momentum_min": 0.004,
+        "cooldown": 20,
+        "max_ops_dia": 4
+    },
+    "TURBO-USDT": {
+        "inc": 100,
+        "min": 5000,
+        "vol_min": 500000,
+        "momentum_min": 0.012,
+        "cooldown": 35,
+        "max_ops_dia": 3
+    },
+    "BONK-USDT": {
+        "inc": 1000,
+        "min": 50000,
+        "vol_min": 600000,
+        "momentum_min": 0.011,
+        "cooldown": 40,
+        "max_ops_dia": 3
+    },
+    "WIF-USDT": {
+        "inc": 0.0001,
+        "min": 0.01,
+        "vol_min": 900000,
+        "momentum_min": 0.007,
+        "cooldown": 25,
+        "max_ops_dia": 4
+    }
 }
 
 CONFIG = {
@@ -73,43 +120,141 @@ CONFIG = {
     "max_operaciones": 1,        # Solo 1 operación a la vez
     "puntaje_minimo": 3.0,
     "reanalisis_segundos": 15,
-    "saldo_minimo": 20.00,
+    "saldo_minimo": 36.00,       # Ajustado para $36
     "min_ganancia_objetivo": 0.02,  # TP mínimo 2%
     "nivel_proteccion": -0.01,
-    "auto_optimizar": False,      # Desactivado para saldos pequeños
+    "max_duracion_minutos": 30,  # 30 minutos máximo por operación
+    "auto_optimizar": False,
     "noticias": False
 }
 
 # =================================================================
-# FUNCIONES PRINCIPALES (OPTIMIZADAS PARA LOW CAPITAL)
+# VARIABLES GLOBALES
 # =================================================================
+operaciones_activas = []
+historial_operaciones = []
+operaciones_recientes = {}
+cooldown_activo = set()
+bot_activo = False
+lock = asyncio.Lock()
+
+# =================================================================
+# FUNCIONES AUXILIARES
+# =================================================================
+async def guardar_historial():
+    try:
+        with open('historial_operaciones.json', 'w') as f:
+            json.dump(historial_operaciones, f, indent=4, default=str)
+    except Exception as e:
+        logger.error(f"Error guardando historial: {e}")
+
+async def verificar_cooldown(par):
+    if par in cooldown_activo:
+        config = PARES_CONFIG.get(par, {})
+        cooldown = config.get("cooldown", 30)
+        ultima_op = operaciones_recientes.get(par)
+        
+        if ultima_op and (datetime.now() - ultima_op).seconds < cooldown * 60:
+            return True
+        else:
+            cooldown_activo.discard(par)
+    return False
+
+async def obtener_saldo_disponible():
+    try:
+        accounts = User(
+            key=os.getenv("API_KEY"),
+            secret=os.getenv("SECRET_KEY"),
+            passphrase=os.getenv("API_PASSPHRASE")
+        ).get_account_list(currency="USDT", account_type="trade")
+        if accounts:
+            return float(accounts[0]['available'])
+        return 0.0
+    except Exception as e:
+        logger.error(f"Error obteniendo saldo: {e}")
+        return 0.0
+
+# =================================================================
+# FUNCIONES PRINCIPALES DE TRADING
+# =================================================================
+async def analizar_impulso(par):
+    try:
+        # Verificar volumen mínimo primero
+        stats_24h = Market(
+            key=os.getenv("API_KEY"),
+            secret=os.getenv("SECRET_KEY"),
+            passphrase=os.getenv("API_PASSPHRASE")
+        ).get_24h_stats(par)
+        
+        volumen_usdt = float(stats_24h["volValue"])
+        if volumen_usdt < PARES_CONFIG[par]["vol_min"]:
+            return None
+            
+        # Obtener velas de 1 minuto
+        velas = Market(
+            key=os.getenv("API_KEY"),
+            secret=os.getenv("SECRET_KEY"),
+            passphrase=os.getenv("API_PASSPHRASE")
+        ).get_kline(symbol=par, kline_type="1min", limit=3)
+        
+        if len(velas) < 3:
+            return None
+            
+        # Extraer datos de las últimas 3 velas
+        vela_actual = float(velas[-1][2])
+        vela_anterior = float(velas[-2][2])
+        vela_anterior2 = float(velas[-3][2])
+        
+        # Verificar 2 velas alcistas consecutivas
+        if not (vela_actual > vela_anterior > vela_anterior2):
+            return None
+            
+        # Verificar momentum mínimo
+        momentum = (vela_actual - vela_anterior2) / vela_anterior2
+        if momentum < PARES_CONFIG[par]["momentum_min"]:
+            return None
+            
+        # Verificar spread
+        ticker = Market(
+            key=os.getenv("API_KEY"),
+            secret=os.getenv("SECRET_KEY"),
+            passphrase=os.getenv("API_PASSPHRASE")
+        ).get_ticker(par)
+        
+        spread = (float(ticker["bestAsk"]) - float(ticker["bestBid"])) / float(ticker["bestAsk"])
+        if spread > 0.0015:  # 0.15%
+            return None
+            
+        return {
+            "par": par,
+            "precio": vela_actual,
+            "take_profit": vela_actual * (1 + PARES_CONFIG[par]["tp"]),
+            "stop_loss": vela_actual * (1 - PARES_CONFIG[par]["sl"]),
+            "momentum": momentum
+        }
+    except Exception as e:
+        logger.error(f"Error analizando {par}: {e}")
+        return None
 
 async def calcular_cantidad_segura(par, saldo_disponible, precio):
-    """
-    Calcula la cantidad a comprar garantizando:
-    - Suficiente para fees (3 transacciones)
-    - Cumple mínimos del par
-    - No excede el saldo disponible
-    """
     config_par = PARES_CONFIG[par]
     
-    # 1. Calcular máximo teórico considerando fees (0.3% total)
-    monto_max = saldo_disponible * 0.997  # Ajuste por fees
-    cantidad_teorica = (monto_max / precio) // config_par["inc"] * config_par["inc"]
+    # 1. Ajustar por fees (0.3% total estimado)
+    monto_max = saldo_disponible * 0.997
+    cantidad = (monto_max / precio) // config_par["inc"] * config_par["inc"]
     
     # 2. Verificar mínimos
-    if cantidad_teorica < config_par["min"]:
+    if cantidad < config_par["min"]:
         return None
         
     # 3. Verificar mínimo en USDT
-    valor_operacion = cantidad_teorica * precio
+    valor_operacion = cantidad * precio
     if valor_operacion < MINIMO_USDT[par]:
         return None
         
-    return cantidad_teorica
+    return cantidad
 
 async def ejecutar_compra_segura(operacion):
-    """Versión segura para saldos pequeños"""
     try:
         saldo = await obtener_saldo_disponible()
         if saldo < CONFIG["saldo_minimo"]:
@@ -125,26 +270,31 @@ async def ejecutar_compra_segura(operacion):
             return None
             
         # Ejecutar compra
-        order = trade.create_market_order(operacion["par"], "buy", cantidad)
-        fee = float(order["fee"])
+        trade_client = Trade(
+            key=os.getenv("API_KEY"),
+            secret=os.getenv("SECRET_KEY"),
+            passphrase=os.getenv("API_PASSPHRASE")
+        )
         
-        # Configurar operación SIN TP PARCIAL (para saldos < $50)
+        order = trade_client.create_market_order(operacion["par"], "buy", cantidad)
+        fee = float(order.get("fee", 0))
+        
         operacion.update({
             "id_orden": order["orderId"],
             "cantidad": cantidad,
             "precio_entrada": float(order["price"]),
-            "hora_entrada": datetime.utcnow(),
+            "hora_entrada": datetime.now(),
             "take_profit": float(order["price"]) * (1 + CONFIG["min_ganancia_objetivo"]),
             "stop_loss": float(order["price"]) * (1 + CONFIG["nivel_proteccion"]),
             "max_precio": float(order["price"]),
             "fee_compra": fee,
             "saldo_restante": saldo - (cantidad * operacion["precio"]) - fee,
-            "fase_tp": True  # Forzar TP completo
+            "fase_tp": True  # TP completo para saldos pequeños
         })
         
         # Notificación detallada
         await bot.send_message(
-            CHAT_ID,
+            os.getenv("CHAT_ID"),
             f"🚀 ENTRADA SEGURA {operacion['par']}\n"
             f"💵 Precio: {operacion['precio_entrada']:.8f}\n"
             f"📈 Objetivo: {operacion['take_profit']:.8f} (+{CONFIG['min_ganancia_objetivo']*100:.2f}%)\n"
@@ -154,7 +304,8 @@ async def ejecutar_compra_segura(operacion):
         )
         
         operaciones_activas.append(operacion)
-        operaciones_recientes[operacion["par"]] = datetime.utcnow()
+        operaciones_recientes[operacion["par"]] = datetime.now()
+        cooldown_activo.add(operacion["par"])
         return operacion
         
     except Exception as e:
@@ -162,13 +313,17 @@ async def ejecutar_compra_segura(operacion):
         return None
 
 async def gestionar_operacion_low_capital(operacion):
-    """Versión simplificada del trailing stop para saldos pequeños"""
     try:
-        ticker = market.get_ticker(operacion["par"])
+        ticker = Market(
+            key=os.getenv("API_KEY"),
+            secret=os.getenv("SECRET_KEY"),
+            passphrase=os.getenv("API_PASSPHRASE")
+        ).get_ticker(operacion["par"])
+        
         precio_actual = float(ticker["price"])
         operacion["max_precio"] = max(operacion["max_precio"], precio_actual)
         
-        # 1. Take Profit completo (no hay parcial)
+        # 1. Take Profit completo
         if precio_actual >= operacion["take_profit"]:
             await ejecutar_venta_completa(operacion, "take_profit")
             return True
@@ -178,32 +333,37 @@ async def gestionar_operacion_low_capital(operacion):
         
         if ganancia > 0.015:  # Si lleva +1.5%
             nuevo_sl = operacion["precio_entrada"] * 1.005  # Lock 0.5% de ganancia
-        else:
-            nuevo_sl = operacion["stop_loss"]
+            operacion["stop_loss"] = max(operacion["stop_loss"], nuevo_sl)
             
-        operacion["stop_loss"] = max(operacion["stop_loss"], nuevo_sl)
-        
-        # 3. Verificar salida
         if precio_actual <= operacion["stop_loss"]:
             await ejecutar_venta_completa(operacion, "stop_loss")
             return True
             
+        # 3. Tiempo máximo
+        if (datetime.now() - operacion["hora_entrada"]).seconds > CONFIG["max_duracion_minutos"] * 60:
+            await ejecutar_venta_completa(operacion, "tiempo_excedido")
+            return True
+            
         return False
-        
     except Exception as e:
-        logger.error(f"Error en gestión low capital: {e}")
+        logger.error(f"Error gestionando operación: {e}")
         return False
 
 async def ejecutar_venta_completa(operacion, motivo):
-    """Vende el 100% de la posición"""
     try:
-        order = trade.create_market_order(operacion["par"], "sell", operacion["cantidad"])
-        fee = float(order["fee"])
+        trade_client = Trade(
+            key=os.getenv("API_KEY"),
+            secret=os.getenv("SECRET_KEY"),
+            passphrase=os.getenv("API_PASSPHRASE")
+        )
+        
+        order = trade_client.create_market_order(operacion["par"], "sell", operacion["cantidad"])
+        fee = float(order.get("fee", 0))
         ganancia = ((float(order["price"]) - operacion["precio_entrada"]) / operacion["precio_entrada"]) * 100
         
         operacion.update({
             "precio_salida": float(order["price"]),
-            "hora_salida": datetime.utcnow(),
+            "hora_salida": datetime.now(),
             "ganancia": ganancia,
             "motivo_salida": motivo,
             "fee_venta": fee
@@ -216,7 +376,7 @@ async def ejecutar_venta_completa(operacion, motivo):
         # Notificación transparente
         emoji = "🟢" if ganancia_neto >= 0 else "🔴"
         await bot.send_message(
-            CHAT_ID,
+            os.getenv("CHAT_ID"),
             f"{emoji} SALIDA COMPLETA {operacion['par']}\n"
             f"📌 Motivo: {motivo}\n"
             f"🔢 Entrada: {operacion['precio_entrada']:.8f}\n"
@@ -233,17 +393,14 @@ async def ejecutar_venta_completa(operacion, motivo):
             await guardar_historial()
             
         return True
-        
     except Exception as e:
-        logger.error(f"Error en venta completa: {e}")
+        logger.error(f"Error en venta: {e}")
         return False
 
 # =================================================================
-# CICLO PRINCIPAL OPTIMIZADO
+# CICLO PRINCIPAL DE TRADING
 # =================================================================
-
 async def ciclo_trading_low_capital():
-    """Versión optimizada para saldos desde $36"""
     global bot_activo
     
     while bot_activo:
@@ -257,7 +414,7 @@ async def ciclo_trading_low_capital():
                     
                 # 2. Priorizar pares con mejor relación riesgo/beneficio
                 pares_priorizados = sorted(
-                    PARES,
+                    PARES_CONFIG.keys(),
                     key=lambda p: (PARES_CONFIG[p]["momentum_min"] / MINIMO_USDT[p]),
                     reverse=True
                 )
@@ -274,23 +431,18 @@ async def ciclo_trading_low_capital():
                             await asyncio.sleep(5)  # Esperar antes de siguiente operación
                             break
                 
-                # 4. Gestionar operación activa (si existe)
+                # 4. Gestionar operaciones activas
                 for op in operaciones_activas[:]:
-                    if (datetime.utcnow() - op["hora_entrada"]).seconds > 1800:  # 30 min máximo
-                        await ejecutar_venta_completa(op, "tiempo_excedido")
-                    else:
-                        await gestionar_operacion_low_capital(op)
-                        
+                    await gestionar_operacion_low_capital(op)
+                    
             await asyncio.sleep(CONFIG["reanalisis_segundos"])
-            
         except Exception as e:
-            logger.error(f"Error en ciclo low capital: {e}")
+            logger.error(f"Error en ciclo: {e}")
             await asyncio.sleep(30)
 
 # =================================================================
-# COMANDOS DE TELEGRAM (ACTUALIZADOS)
+# COMANDOS DE TELEGRAM
 # =================================================================
-
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     global bot_activo
@@ -302,25 +454,55 @@ async def cmd_start(message: types.Message):
             "⚡ Configuración actual:\n"
             f"- Uso de saldo: {CONFIG['uso_saldo']*100:.0f}%\n"
             f"- TP mínimo: {CONFIG['min_ganancia_objetivo']*100:.2f}%\n"
-            f"- Máx. operaciones: {CONFIG['max_operaciones']}"
+            f"- Máx. operaciones: {CONFIG['max_operaciones']}\n"
+            f"- Saldo mínimo: ${CONFIG['saldo_minimo']:.2f}"
         )
     else:
         await message.answer("⚠ El bot ya está activo")
 
+@dp.message(Command("stop"))
+async def cmd_stop(message: types.Message):
+    global bot_activo
+    bot_activo = False
+    await message.answer("🛑 Bot detenido")
+
 @dp.message(Command("balance"))
 async def cmd_balance(message: types.Message):
     saldo = await obtener_saldo_disponible()
+    pares_viables = [p for p in PARES_CONFIG.keys() if MINIMO_USDT[p] <= saldo*0.9]
+    
     await message.answer(
         f"💰 Balance Actual\n"
         f"Saldo disponible: {saldo:.2f} USDT\n"
         f"Mínimo requerido: {CONFIG['saldo_minimo']:.2f} USDT\n"
-        f"Pares viables: {', '.join(p for p in PARES if MINIMO_USDT[p] <= saldo*0.9)}"
+        f"Pares viables: {', '.join(pares_viables)}"
     )
+
+@dp.message(Command("operaciones"))
+async def cmd_operaciones(message: types.Message):
+    if not operaciones_activas:
+        await message.answer("No hay operaciones activas")
+        return
+        
+    respuesta = "📈 Operaciones Activas:\n\n"
+    for op in operaciones_activas:
+        duracion = (datetime.now() - op["hora_entrada"]).seconds // 60
+        ganancia_actual = ((op["max_precio"] - op["precio_entrada"]) / op["precio_entrada"]) * 100
+        
+        respuesta += (
+            f"🔹 {op['par']}\n"
+            f"Entrada: {op['precio_entrada']:.8f}\n"
+            f"Actual: {op['max_precio']:.8f}\n"
+            f"Ganancia: {ganancia_actual:.2f}%\n"
+            f"Stop: {op['stop_loss']:.8f}\n"
+            f"Duración: {duracion} min\n\n"
+        )
+    
+    await message.answer(respuesta)
 
 # =================================================================
 # EJECUCIÓN PRINCIPAL
 # =================================================================
-
 async def main():
     await dp.start_polling(bot)
 
