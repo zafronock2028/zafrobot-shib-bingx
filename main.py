@@ -691,8 +691,8 @@ async def ciclo_trading():
 async def ejecutar_bot():
     logger.info("=== INICIANDO BOT ===")
     global bot
-    bot = Bot(os.getenv("TELEGRAM_TOKEN"))
-    dp = Dispatcher()
+    bot = Bot(token=os.getenv("TELEGRAM_TOKEN"))
+    dp = Dispatcher(bot=bot)
     
     try:
         await register_handlers(dp)
