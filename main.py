@@ -5,14 +5,19 @@ import json
 from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from kucoin.client import Trade, Market, User
 from dotenv import load_dotenv
 
 # Configuración inicial
 load_dotenv()
 
-# Inicialización crítica que faltaba
-bot = Bot(token=os.getenv("TELEGRAM_TOKEN"))
+# Validar variables de entorno
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+if not TELEGRAM_TOKEN:
+    raise ValueError("TELEGRAM_TOKEN no está configurado")
+
+bot = Bot(token=TELEGRAM_TOKEN)
 dp = Dispatcher()
 
 # Logger profesional
@@ -55,7 +60,9 @@ PARES_CONFIG = {
         "vol_min": 800000,
         "momentum_min": 0.008,
         "cooldown": 20,
-        "max_ops_dia": 5
+        "max_ops_dia": 5,
+        "tp": 0.02,
+        "sl": 0.01
     },
     "PEPE-USDT": {
         "inc": 100,
@@ -63,7 +70,9 @@ PARES_CONFIG = {
         "vol_min": 600000,
         "momentum_min": 0.010,
         "cooldown": 25,
-        "max_ops_dia": 6
+        "max_ops_dia": 6,
+        "tp": 0.025,
+        "sl": 0.012
     },
     "FLOKI-USDT": {
         "inc": 100,
@@ -71,7 +80,9 @@ PARES_CONFIG = {
         "vol_min": 700000,
         "momentum_min": 0.009,
         "cooldown": 30,
-        "max_ops_dia": 5
+        "max_ops_dia": 5,
+        "tp": 0.022,
+        "sl": 0.011
     },
     "DOGE-USDT": {
         "inc": 1,
@@ -79,7 +90,9 @@ PARES_CONFIG = {
         "vol_min": 2000000,
         "momentum_min": 0.005,
         "cooldown": 15,
-        "max_ops_dia": 3
+        "max_ops_dia": 3,
+        "tp": 0.015,
+        "sl": 0.008
     },
     "SUI-USDT": {
         "inc": 0.01,
@@ -87,7 +100,9 @@ PARES_CONFIG = {
         "vol_min": 1500000,
         "momentum_min": 0.004,
         "cooldown": 20,
-        "max_ops_dia": 4
+        "max_ops_dia": 4,
+        "tp": 0.018,
+        "sl": 0.009
     },
     "TURBO-USDT": {
         "inc": 100,
@@ -95,7 +110,9 @@ PARES_CONFIG = {
         "vol_min": 500000,
         "momentum_min": 0.012,
         "cooldown": 35,
-        "max_ops_dia": 3
+        "max_ops_dia": 3,
+        "tp": 0.03,
+        "sl": 0.015
     },
     "BONK-USDT": {
         "inc": 1000,
@@ -103,7 +120,9 @@ PARES_CONFIG = {
         "vol_min": 600000,
         "momentum_min": 0.011,
         "cooldown": 40,
-        "max_ops_dia": 3
+        "max_ops_dia": 3,
+        "tp": 0.028,
+        "sl": 0.014
     },
     "WIF-USDT": {
         "inc": 0.0001,
@@ -111,7 +130,9 @@ PARES_CONFIG = {
         "vol_min": 900000,
         "momentum_min": 0.007,
         "cooldown": 25,
-        "max_ops_dia": 4
+        "max_ops_dia": 4,
+        "tp": 0.02,
+        "sl": 0.01
     }
 }
 
@@ -141,6 +162,24 @@ lock = asyncio.Lock()
 # =================================================================
 # FUNCIONES AUXILIARES
 # =================================================================
+async def crear_menu_principal():
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🚀 Iniciar Bot", callback_data="start_bot")],
+        [InlineKeyboardButton(text="🛑 Detener Bot", callback_data="stop_bot")],
+        [InlineKeyboardButton(text="💰 Balance", callback_data="balance")],
+        [InlineKeyboardButton(text="📈 Operaciones", callback_data="operaciones")],
+        [InlineKeyboardButton(text="⚙ Configuración", callback_data="config")]
+    ])
+    return keyboard
+
+async def crear_menu_configuracion():
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Menú Principal", callback_data="main_menu")],
+        [InlineKeyboardButton(text="📊 Ajustar TP/SL", callback_data="ajustar_tpsl")],
+        [InlineKeyboardButton(text="💵 Cambiar Saldo Mínimo", callback_data="cambiar_saldo")]
+    ])
+    return keyboard
+
 async def guardar_historial():
     try:
         with open('historial_operaciones.json', 'w') as f:
@@ -292,7 +331,11 @@ async def ejecutar_compra_segura(operacion):
             "fase_tp": True  # TP completo para saldos pequeños
         })
         
-        # Notificación detallada
+        # Notificación detallada con botón
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📊 Ver Operaciones", callback_data="operaciones")]
+        ])
+        
         await bot.send_message(
             os.getenv("CHAT_ID"),
             f"🚀 ENTRADA SEGURA {operacion['par']}\n"
@@ -300,7 +343,8 @@ async def ejecutar_compra_segura(operacion):
             f"📈 Objetivo: {operacion['take_profit']:.8f} (+{CONFIG['min_ganancia_objetivo']*100:.2f}%)\n"
             f"🛑 Stop: {operacion['stop_loss']:.8f}\n"
             f"💸 Fee: {fee:.6f} USDT\n"
-            f"💰 Saldo restante: {operacion['saldo_restante']:.2f} USDT"
+            f"💰 Saldo restante: {operacion['saldo_restante']:.2f} USDT",
+            reply_markup=keyboard
         )
         
         operaciones_activas.append(operacion)
@@ -373,8 +417,12 @@ async def ejecutar_venta_completa(operacion, motivo):
         balance_neto = (operacion["cantidad"] * operacion["precio_salida"]) - fee
         ganancia_neto = balance_neto - (operacion["cantidad"] * operacion["precio_entrada"] + operacion["fee_compra"])
         
-        # Notificación transparente
+        # Notificación transparente con botón
         emoji = "🟢" if ganancia_neto >= 0 else "🔴"
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📊 Ver Historial", callback_data="historial")]
+        ])
+        
         await bot.send_message(
             os.getenv("CHAT_ID"),
             f"{emoji} SALIDA COMPLETA {operacion['par']}\n"
@@ -383,7 +431,8 @@ async def ejecutar_venta_completa(operacion, motivo):
             f"💰 Salida: {operacion['precio_salida']:.8f}\n"
             f"📈 Ganancia Bruta: {ganancia:.2f}%\n"
             f"💸 Fee total: {operacion['fee_compra'] + fee:.6f} USDT\n"
-            f"💵 Ganancia Neta: {ganancia_neto:.4f} USDT"
+            f"💵 Ganancia Neta: {ganancia_neto:.4f} USDT",
+            reply_markup=keyboard
         )
         
         # Actualizar historial
@@ -441,47 +490,82 @@ async def ciclo_trading_low_capital():
             await asyncio.sleep(30)
 
 # =================================================================
-# COMANDOS DE TELEGRAM
+# COMANDOS Y MANEJADORES DE TELEGRAM
 # =================================================================
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     global bot_activo
+    menu = await crear_menu_principal()
+    await message.answer(
+        "🤖 Bot de Trading KuCoin - Modo Low Capital\n"
+        "Selecciona una opción:",
+        reply_markup=menu
+    )
+
+@dp.callback_query(lambda c: c.data == "main_menu")
+async def main_menu(callback_query: types.CallbackQuery):
+    menu = await crear_menu_principal()
+    await bot.edit_message_text(
+        chat_id=callback_query.message.chat.id,
+        message_id=callback_query.message.message_id,
+        text="🤖 Bot de Trading KuCoin - Modo Low Capital\nSelecciona una opción:",
+        reply_markup=menu
+    )
+    await callback_query.answer()
+
+@dp.callback_query(lambda c: c.data == "start_bot")
+async def start_bot(callback_query: types.CallbackQuery):
+    global bot_activo
     if not bot_activo:
         bot_activo = True
         asyncio.create_task(ciclo_trading_low_capital())
-        await message.answer(
-            "🚀 Bot Iniciado (Modo Low Capital)\n"
-            "⚡ Configuración actual:\n"
-            f"- Uso de saldo: {CONFIG['uso_saldo']*100:.0f}%\n"
-            f"- TP mínimo: {CONFIG['min_ganancia_objetivo']*100:.2f}%\n"
-            f"- Máx. operaciones: {CONFIG['max_operaciones']}\n"
-            f"- Saldo mínimo: ${CONFIG['saldo_minimo']:.2f}"
+        await bot.edit_message_text(
+            chat_id=callback_query.message.chat.id,
+            message_id=callback_query.message.message_id,
+            text="🚀 Bot Iniciado (Modo Low Capital)\n"
+                 "⚡ Configuración actual:\n"
+                 f"- Uso de saldo: {CONFIG['uso_saldo']*100:.0f}%\n"
+                 f"- TP mínimo: {CONFIG['min_ganancia_objetivo']*100:.2f}%\n"
+                 f"- Máx. operaciones: {CONFIG['max_operaciones']}\n"
+                 f"- Saldo mínimo: ${CONFIG['saldo_minimo']:.2f}",
+            reply_markup=await crear_menu_principal()
         )
     else:
-        await message.answer("⚠ El bot ya está activo")
+        await callback_query.answer("⚠ El bot ya está activo", show_alert=True)
+    await callback_query.answer()
 
-@dp.message(Command("stop"))
-async def cmd_stop(message: types.Message):
+@dp.callback_query(lambda c: c.data == "stop_bot")
+async def stop_bot(callback_query: types.CallbackQuery):
     global bot_activo
     bot_activo = False
-    await message.answer("🛑 Bot detenido")
+    await bot.edit_message_text(
+        chat_id=callback_query.message.chat.id,
+        message_id=callback_query.message.message_id,
+        text="🛑 Bot detenido",
+        reply_markup=await crear_menu_principal()
+    )
+    await callback_query.answer()
 
-@dp.message(Command("balance"))
-async def cmd_balance(message: types.Message):
+@dp.callback_query(lambda c: c.data == "balance")
+async def show_balance(callback_query: types.CallbackQuery):
     saldo = await obtener_saldo_disponible()
     pares_viables = [p for p in PARES_CONFIG.keys() if MINIMO_USDT[p] <= saldo*0.9]
     
-    await message.answer(
-        f"💰 Balance Actual\n"
-        f"Saldo disponible: {saldo:.2f} USDT\n"
-        f"Mínimo requerido: {CONFIG['saldo_minimo']:.2f} USDT\n"
-        f"Pares viables: {', '.join(pares_viables)}"
+    await bot.edit_message_text(
+        chat_id=callback_query.message.chat.id,
+        message_id=callback_query.message.message_id,
+        text=f"💰 Balance Actual\n"
+             f"Saldo disponible: {saldo:.2f} USDT\n"
+             f"Mínimo requerido: {CONFIG['saldo_minimo']:.2f} USDT\n"
+             f"Pares viables: {', '.join(pares_viables)}",
+        reply_markup=await crear_menu_principal()
     )
+    await callback_query.answer()
 
-@dp.message(Command("operaciones"))
-async def cmd_operaciones(message: types.Message):
+@dp.callback_query(lambda c: c.data == "operaciones")
+async def show_operaciones(callback_query: types.CallbackQuery):
     if not operaciones_activas:
-        await message.answer("No hay operaciones activas")
+        await callback_query.answer("No hay operaciones activas", show_alert=True)
         return
         
     respuesta = "📈 Operaciones Activas:\n\n"
@@ -498,7 +582,28 @@ async def cmd_operaciones(message: types.Message):
             f"Duración: {duracion} min\n\n"
         )
     
-    await message.answer(respuesta)
+    await bot.edit_message_text(
+        chat_id=callback_query.message.chat.id,
+        message_id=callback_query.message.message_id,
+        text=respuesta,
+        reply_markup=await crear_menu_principal()
+    )
+    await callback_query.answer()
+
+@dp.callback_query(lambda c: c.data == "config")
+async def show_config(callback_query: types.CallbackQuery):
+    menu = await crear_menu_configuracion()
+    await bot.edit_message_text(
+        chat_id=callback_query.message.chat.id,
+        message_id=callback_query.message.message_id,
+        text="⚙ Configuración Actual:\n"
+             f"🔹 Take Profit: {CONFIG['min_ganancia_objetivo']*100:.2f}%\n"
+             f"🔹 Stop Loss: {abs(CONFIG['nivel_proteccion']*100):.2f}%\n"
+             f"🔹 Saldo mínimo: ${CONFIG['saldo_minimo']:.2f}\n"
+             f"🔹 Uso de saldo: {CONFIG['uso_saldo']*100:.0f}%",
+        reply_markup=menu
+    )
+    await callback_query.answer()
 
 # =================================================================
 # EJECUCIÓN PRINCIPAL
