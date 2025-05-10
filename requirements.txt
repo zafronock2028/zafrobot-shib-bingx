@@ -1,4 +1,6 @@
 aiogram==3.4.1
 kucoin-python==1.0.12
-flask==3.0.2
 python-dotenv==1.0.0
+pandas==2.2.2
+numpy==1.26.4
+flask==3.0.2
