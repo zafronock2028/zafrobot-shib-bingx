@@ -12,6 +12,12 @@ from dotenv import load_dotenv
 # 1. Configuración inicial mejorada
 load_dotenv()
 
+# Validación robusta de variables de entorno
+REQUIRED_ENV_VARS = ["TELEGRAM_TOKEN", "CHAT_ID", "API_KEY", "SECRET_KEY", "API_PASSPHRASE"]
+missing_vars = [var for var in REQUIRED_ENV_VARS if not os.getenv(var)]
+if missing_vars:
+    raise EnvironmentError(f"Faltan variables de entorno requeridas: {', '.join(missing_vars)}")
+
 # Configuración avanzada de logging
 logging.basicConfig(
     level=logging.INFO,
@@ -23,19 +29,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("KuCoinProTrader")
 
-# 2. Validación robusta de configuración
-REQUIRED_ENV_VARS = [
-    "TELEGRAM_TOKEN", "CHAT_ID",
-    "API_KEY", "SECRET_KEY", "API_PASSPHRASE"
-]
-
-missing_vars = [var for var in REQUIRED_ENV_VARS if not os.getenv(var)]
-if missing_vars:
-    error_msg = f"Error: Faltan variables de entorno: {', '.join(missing_vars)}"
-    logger.critical(error_msg)
-    raise EnvironmentError(error_msg)
-
-# 3. Inicialización con manejo de errores
+# 2. Inicialización con manejo de errores
 try:
     bot = Bot(token=os.getenv("TELEGRAM_TOKEN"))
     dp = Dispatcher()
@@ -44,57 +38,55 @@ except Exception as e:
     logger.critical(f"Error al inicializar el bot: {e}")
     raise
 
-# 4. Configuración optimizada de trading
-TRADING_CONFIG = {
+# 3. Configuración optimizada de trading
+PARES_CONFIG = {
     "SHIB-USDT": {
-        "increment": 1000, "min_qty": 50000, "min_vol": 800000,
-        "min_momentum": 0.008, "cooldown": 20, "daily_limit": 5,
+        "inc": 1000, "min": 50000, "vol_min": 800000,
+        "momentum_min": 0.008, "cooldown": 20, "max_ops_dia": 5,
         "tp": 0.02, "sl": 0.01
     },
     "PEPE-USDT": {
-        "increment": 100, "min_qty": 5000, "min_vol": 600000,
-        "min_momentum": 0.01, "cooldown": 25, "daily_limit": 6,
+        "inc": 100, "min": 5000, "vol_min": 600000,
+        "momentum_min": 0.010, "cooldown": 25, "max_ops_dia": 6,
         "tp": 0.025, "sl": 0.012
     },
-    # ... (otros pares)
+    # ... (otros pares con misma estructura)
 }
 
-GLOBAL_CONFIG = {
-    "balance_usage": 0.9,
-    "max_trades": 1,
-    "analysis_interval": 15,
-    "min_balance": 36.0,
-    "min_profit": 0.02,
-    "protection_level": -0.01,
-    "max_duration": 30
+CONFIG = {
+    "uso_saldo": 0.90,
+    "max_operaciones": 1,
+    "reanalisis_segundos": 15,
+    "saldo_minimo": 36.00,
+    "min_ganancia_objetivo": 0.02,
+    "nivel_proteccion": -0.01,
+    "max_duracion_minutos": 30
 }
 
-# 5. Estado del bot con seguridad thread-safe
-class TradingState:
+# 4. Estado del bot con seguridad thread-safe
+class EstadoTrading:
     def __init__(self):
-        self.active_trades = []
-        self.trade_history = []
-        self.recent_trades = {}
-        self.cooldowns = set()
-        self.is_active = False
+        self.operaciones_activas = []
+        self.historial_operaciones = []
+        self.operaciones_recientes = {}
+        self.cooldown_activo = set()
+        self.bot_activo = False
         self.lock = asyncio.Lock()
-        self.last_analysis = datetime.now()
 
-state = TradingState()
+estado = EstadoTrading()
 
-# 6. Funciones auxiliares mejoradas
-async def create_main_menu():
+# 5. Funciones auxiliares mejoradas
+async def crear_menu_principal():
     """Crea el menú interactivo principal"""
     buttons = [
-        [InlineKeyboardButton(text="🚀 Iniciar Trading", callback_data="start_trading"),
-         InlineKeyboardButton(text="🛑 Detener Trading", callback_data="stop_trading")],
-        [InlineKeyboardButton(text="💰 Balance", callback_data="show_balance"),
-         InlineKeyboardButton(text="📊 Operaciones", callback_data="show_trades")],
-        [InlineKeyboardButton(text="⚙ Configuración", callback_data="show_config")]
+        [InlineKeyboardButton(text="🚀 Iniciar Bot", callback_data="start_bot"),
+         InlineKeyboardButton(text="🛑 Detener Bot", callback_data="stop_bot")],
+        [InlineKeyboardButton(text="💰 Balance", callback_data="balance"),
+         InlineKeyboardButton(text="📈 Operaciones", callback_data="operaciones")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-async def get_available_balance():
+async def obtener_saldo_disponible():
     """Obtiene el saldo disponible con manejo robusto de errores"""
     try:
         user_client = User(
@@ -109,108 +101,92 @@ async def get_available_balance():
         )
         return float(accounts[0]['available']) if accounts else 0.0
     except Exception as e:
-        logger.error(f"Error al obtener balance: {e}")
+        logger.error(f"Error obteniendo saldo: {e}")
         return 0.0
 
-# 7. Núcleo de trading optimizado
-async def analyze_market():
-    """Analiza el mercado en busca de oportunidades"""
-    opportunities = []
+# 6. Núcleo de trading optimizado
+async def ciclo_trading_principal():
+    """Ciclo principal de trading mejorado"""
+    logger.info("Iniciando ciclo principal de trading...")
     
-    try:
-        balance = await get_available_balance()
-        if balance < GLOBAL_CONFIG["min_balance"]:
-            logger.warning(f"Saldo insuficiente: {balance} USDT")
-            return opportunities
-
-        for pair, config in TRADING_CONFIG.items():
-            if pair in state.cooldowns:
-                continue
-                
-            signal = await detect_opportunity(pair, config)
-            if signal:
-                opportunities.append(signal)
-                
-    except Exception as e:
-        logger.error(f"Error en análisis de mercado: {e}")
-    
-    return opportunities
-
-async def trading_cycle():
-    """Ciclo principal de trading"""
-    logger.info("Iniciando ciclo de trading...")
-    
-    while state.is_active:
+    while estado.bot_activo:
         try:
-            async with state.lock:
-                # 1. Análisis de mercado
-                opportunities = await analyze_market()
+            async with estado.lock:
+                # Verificar saldo mínimo
+                saldo = await obtener_saldo_disponible()
+                if saldo < CONFIG["saldo_minimo"]:
+                    logger.warning(f"Saldo insuficiente: {saldo} USDT")
+                    await asyncio.sleep(60)
+                    continue
                 
-                # 2. Ejecución de operaciones
-                for opportunity in opportunities[:GLOBAL_CONFIG["max_trades"]]:
-                    if len(state.active_trades) >= GLOBAL_CONFIG["max_trades"]:
-                        break
+                # Buscar oportunidades de trading
+                for par in list(PARES_CONFIG.keys())[:3]:  # Solo top 3 pares
+                    if await verificar_cooldown(par):
+                        continue
                         
-                    await execute_trade(opportunity)
-                    await asyncio.sleep(5)
+                    señal = await analizar_impulso(par)
+                    if señal and len(estado.operaciones_activas) < CONFIG["max_operaciones"]:
+                        operacion = await ejecutar_compra_segura(señal)
+                        if operacion:
+                            await asyncio.sleep(5)  # Espera entre operaciones
                 
-                # 3. Gestión de operaciones
-                await manage_active_trades()
-                
-            await asyncio.sleep(GLOBAL_CONFIG["analysis_interval"])
+                # Gestionar operaciones activas
+                for op in estado.operaciones_activas[:]:
+                    await gestionar_operacion(op)
+                    
+            await asyncio.sleep(CONFIG["reanalisis_segundos"])
             
         except Exception as e:
             logger.error(f"Error en ciclo de trading: {e}")
             await asyncio.sleep(30)
 
-# 8. Handlers de Telegram mejorados
-@dp.message(Command("start", "menu"))
-async def start_command(message: types.Message):
-    """Maneja el comando de inicio"""
+# 7. Handlers de Telegram mejorados
+@dp.message(Command("start"))
+async def comando_inicio(message: types.Message):
+    """Maneja el comando de inicio con menú interactivo"""
     await message.answer(
-        "🤖 KuCoin Pro Bot - Listo\n"
+        "🤖 KuCoin Trading Bot - Listo\n"
         "Selecciona una opción:",
-        reply_markup=await create_main_menu()
+        reply_markup=await crear_menu_principal()
     )
 
-@dp.callback_query(lambda c: c.data == "start_trading")
-async def start_trading(callback: types.CallbackQuery):
-    """Inicia el trading automático"""
-    if not state.is_active:
-        state.is_active = True
-        asyncio.create_task(trading_cycle())
+@dp.callback_query(lambda c: c.data == "start_bot")
+async def iniciar_bot(callback: types.CallbackQuery):
+    """Inicia el bot de trading"""
+    if not estado.bot_activo:
+        estado.bot_activo = True
+        asyncio.create_task(ciclo_trading_principal())
         
         await callback.message.edit_text(
-            "🚀 Trading automático ACTIVADO\n"
+            "🚀 Bot de trading ACTIVADO\n"
             "⚡ Analizando oportunidades de mercado...",
-            reply_markup=await create_main_menu()
+            reply_markup=await crear_menu_principal()
         )
     await callback.answer()
 
-@dp.callback_query(lambda c: c.data == "show_balance")
-async def show_balance(callback: types.CallbackQuery):
+@dp.callback_query(lambda c: c.data == "balance")
+async def mostrar_balance(callback: types.CallbackQuery):
     """Muestra el balance actual"""
-    balance = await get_available_balance()
-    message = (
-        f"💰 Balance Actual:\n"
-        f"• Saldo disponible: {balance:.2f} USDT\n"
-        f"• Mínimo requerido: {GLOBAL_CONFIG['min_balance']:.2f} USDT"
-    )
+    saldo = await obtener_saldo_disponible()
+    pares_viables = [p for p in PARES_CONFIG if PARES_CONFIG[p]["min"] * 0.001 <= saldo * 0.9]  # Aproximación
     
     await callback.message.edit_text(
-        message,
-        reply_markup=await create_main_menu()
+        f"💰 Balance Actual:\n"
+        f"• Saldo disponible: {saldo:.2f} USDT\n"
+        f"• Mínimo requerido: {CONFIG['saldo_minimo']:.2f} USDT\n"
+        f"• Pares viables: {', '.join(pares_viables[:5])}...",
+        reply_markup=await crear_menu_principal()
     )
     await callback.answer()
 
-# 9. Función principal robusta
-async def run_bot():
+# 8. Función principal robusta
+async def ejecutar_bot():
     """Función principal con manejo de errores"""
-    logger.info("=== INICIANDO KUCOIN PRO BOT ===")
+    logger.info("=== INICIANDO KUCOIN TRADING BOT ===")
     
     try:
         # Verificar conexiones
-        await check_connections()
+        await verificar_conexiones()
         
         # Iniciar el bot
         await dp.start_polling(bot)
@@ -221,8 +197,8 @@ async def run_bot():
         await bot.session.close()
         logger.info("Bot detenido correctamente")
 
-async def check_connections():
-    """Verifica todas las conexiones externas"""
+async def verificar_conexiones():
+    """Verifica todas las conexiones necesarias"""
     logger.info("Verificando conexiones...")
     
     # Verificar KuCoin
@@ -242,10 +218,9 @@ async def check_connections():
         logger.error(f"Error conectando a Telegram: {e}")
         raise
 
-# 10. Punto de entrada
 if __name__ == "__main__":
     try:
-        asyncio.run(run_bot())
+        asyncio.run(ejecutar_bot())
     except KeyboardInterrupt:
         logger.info("Bot detenido manualmente")
     except Exception as e:
