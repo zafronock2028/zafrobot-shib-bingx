@@ -44,7 +44,7 @@ PARES_OPERABLES = {
         "volumen_minimo": 800000,    # Volumen mínimo en USDT (24h)
         "impulso_minimo": 0.008,     # % mínimo de momentum alcista
         "cooldown": 20,              # Minutos de espera entre operaciones
-        "operaciones_diarias": 5,     # Máx operaciones por día
+        "operaciones_diarias": 5,    # Máx operaciones por día
         "take_profit": 0.02,         # % TP inicial
         "stop_loss": 0.01            # % SL inicial
     },
@@ -94,6 +94,40 @@ class EstadoBot:
         self.lock = asyncio.Lock()
 
 estado = EstadoBot()
+
+# =================================================================
+# FUNCIONES PARA BOTONES DE TELEGRAM
+# =================================================================
+
+async def crear_menu_principal():
+    """Crea el menú principal con botones inline"""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🚀 Iniciar Bot", callback_data="iniciar_bot"),
+            InlineKeyboardButton(text="🛑 Detener Bot", callback_data="detener_bot")
+        ],
+        [
+            InlineKeyboardButton(text="💰 Balance", callback_data="ver_balance"),
+            InlineKeyboardButton(text="📊 Operaciones", callback_data="ver_operaciones")
+        ],
+        [
+            InlineKeyboardButton(text="⚙ Configuración", callback_data="ver_config")
+        ]
+    ])
+    return keyboard
+
+async def crear_menu_operacion(par):
+    """Crea menú para una operación específica"""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🔍 Ver Detalles", callback_data=f"detalles_{par}"),
+            InlineKeyboardButton(text="🗑 Cerrar Manual", callback_data=f"cerrar_{par}")
+        ],
+        [
+            InlineKeyboardButton(text="🔙 Menú Principal", callback_data="menu_principal")
+        ]
+    ])
+    return keyboard
 
 # =================================================================
 # FUNCIONES PRINCIPALES - ESTRATEGIA DE IMPULSO
@@ -160,20 +194,6 @@ async def detectar_impulso(par):
         logger.error(f"Error analizando {par}: {e}")
         return None
 
-async def calcular_posicion(par, saldo_disponible, precio):
-    """Calcula tamaño de posición con gestión de riesgo"""
-    config = PARES_OPERABLES[par]
-    
-    # 1. Ajustar por fees (0.2% estimado)
-    monto_max = saldo_disponible * CONFIG_GLOBAL["porcentaje_saldo"] * 0.998
-    cantidad = (monto_max / precio) // config["incremento"] * config["incremento"]
-    
-    # 2. Verificar mínimos de cantidad
-    if cantidad < config["min_cantidad"]:
-        return None
-        
-    return cantidad
-
 async def ejecutar_compra(señal):
     """Ejecuta orden de compra con gestión de riesgo"""
     try:
@@ -213,14 +233,16 @@ async def ejecutar_compra(señal):
             "fee_compra": fee
         }
         
-        # 4. Notificar entrada
+        # 4. Notificar entrada con botones
+        keyboard = await crear_menu_operacion(señal["par"])
         await bot.send_message(
             os.getenv("CHAT_ID"),
             f"🚀 ENTRADA {operacion['par']}\n"
             f"💵 Precio: {operacion['precio_entrada']:.8f}\n"
             f"📈 Objetivo: {operacion['take_profit']:.8f}\n"
             f"🛑 Stop: {operacion['stop_loss']:.8f}\n"
-            f"📊 Cantidad: {operacion['cantidad']:.2f}"
+            f"📊 Cantidad: {operacion['cantidad']:.2f}",
+            reply_markup=keyboard
         )
         
         # 5. Actualizar estado
@@ -234,49 +256,6 @@ async def ejecutar_compra(señal):
     except Exception as e:
         logger.error(f"Error ejecutando compra: {e}")
         return None
-
-async def gestionar_operaciones():
-    """Gestiona operaciones activas con trailing stop"""
-    async with estado.lock:
-        for op in estado.operaciones_activas[:]:
-            try:
-                # 1. Obtener precio actual
-                mercado = Market(
-                    key=os.getenv("API_KEY"),
-                    secret=os.getenv("SECRET_KEY"),
-                    passphrase=os.getenv("API_PASSPHRASE")
-                )
-                ticker = mercado.get_ticker(op["par"])
-                precio_actual = float(ticker["price"])
-                
-                # 2. Actualizar precio máximo
-                op["max_precio"] = max(op["max_precio"], precio_actual)
-                
-                # 3. Verificar Take Profit
-                if precio_actual >= op["take_profit"]:
-                    await cerrar_operacion(op, "TP")
-                    continue
-                    
-                # 4. Verificar Stop Loss dinámico
-                ganancia = (op["max_precio"] - op["precio_entrada"]) / op["precio_entrada"]
-                
-                # Si lleva +1.5%, ajustar SL al 0.5% de ganancia
-                if ganancia > 0.015:
-                    nuevo_sl = op["precio_entrada"] * 1.005
-                    op["stop_loss"] = max(op["stop_loss"], nuevo_sl)
-                
-                if precio_actual <= op["stop_loss"]:
-                    await cerrar_operacion(op, "SL")
-                    continue
-                    
-                # 5. Verificar tiempo máximo
-                if (datetime.now() - op["hora_entrada"]).seconds > CONFIG_GLOBAL["duracion_maxima"] * 60:
-                    await cerrar_operacion(op, "Tiempo")
-                    continue
-                    
-            except Exception as e:
-                logger.error(f"Error gestionando operación {op['par']}: {e}")
-                continue
 
 async def cerrar_operacion(operacion, motivo):
     """Cierra una operación y registra resultados"""
@@ -304,8 +283,12 @@ async def cerrar_operacion(operacion, motivo):
             "fee_venta": fee
         })
         
-        # Notificar cierre
+        # Notificar cierre con botones
         emoji = "🟢" if ganancia_usdt >= 0 else "🔴"
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📊 Ver Historial", callback_data="ver_historial")]
+        ])
+        
         await bot.send_message(
             os.getenv("CHAT_ID"),
             f"{emoji} SALIDA {operacion['par']}\n"
@@ -313,7 +296,8 @@ async def cerrar_operacion(operacion, motivo):
             f"🔢 Entrada: {operacion['precio_entrada']:.8f}\n"
             f"💰 Salida: {operacion['precio_salida']:.8f}\n"
             f"📈 Ganancia: {operacion['ganancia_pct']:.2f}%\n"
-            f"💵 Balance: {operacion['ganancia_usdt']:.4f} USDT"
+            f"💵 Balance: {operacion['ganancia_usdt']:.4f} USDT",
+            reply_markup=keyboard
         )
         
         # Actualizar estado
@@ -323,75 +307,90 @@ async def cerrar_operacion(operacion, motivo):
     except Exception as e:
         logger.error(f"Error cerrando operación: {e}")
 
-async def ciclo_trading():
-    """Ciclo principal de trading"""
-    logger.info("Iniciando estrategia de impulso...")
-    
-    while estado.activo:
-        try:
-            # 1. Gestionar operaciones abiertas
-            await gestionar_operaciones()
-            
-            # 2. Buscar nuevas oportunidades (si no estamos al límite)
-            if len(estado.operaciones_activas) < CONFIG_GLOBAL["max_operaciones"]:
-                for par in PARES_OPERABLES:
-                    if await verificar_cooldown(par):
-                        continue
-                        
-                    señal = await detectar_impulso(par)
-                    if señal:
-                        await ejecutar_compra(señal)
-                        await asyncio.sleep(5)  # Espera entre operaciones
-            
-            await asyncio.sleep(CONFIG_GLOBAL["intervalo_analisis"])
-            
-        except Exception as e:
-            logger.error(f"Error en ciclo de trading: {e}")
-            await asyncio.sleep(30)
-
 # =================================================================
-# COMANDOS DE TELEGRAM
+# HANDLERS DE COMANDOS Y CALLBACKS
 # =================================================================
 
-@dp.message(Command("start"))
-async def iniciar_bot(message: types.Message):
+@dp.message(Command("start", "menu"))
+async def comando_inicio(message: types.Message):
+    """Muestra el menú principal"""
+    await message.answer(
+        "🤖 KuCoin Trading Bot - Estrategia de Impulso\n"
+        "Selecciona una opción:",
+        reply_markup=await crear_menu_principal()
+    )
+
+@dp.callback_query(lambda c: c.data == "menu_principal")
+async def volver_menu(callback: types.CallbackQuery):
+    """Vuelve al menú principal"""
+    await callback.message.edit_text(
+        "🤖 KuCoin Trading Bot - Estrategia de Impulso\n"
+        "Selecciona una opción:",
+        reply_markup=await crear_menu_principal()
+    )
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "iniciar_bot")
+async def iniciar_bot(callback: types.CallbackQuery):
     """Inicia el bot de trading"""
     if not estado.activo:
         estado.activo = True
         asyncio.create_task(ciclo_trading())
         
-        await message.answer(
+        await callback.message.edit_text(
             "🚀 Bot de trading ACTIVADO\n"
             "Estrategia: Impulso de Mercado\n"
-            f"Pares activos: {', '.join(PARES_OPERABLES.keys())}\n"
-            f"Saldo mínimo: {CONFIG_GLOBAL['saldo_minimo']} USDT"
+            f"Pares activos: {', '.join(PARES_OPERABLES.keys())}",
+            reply_markup=await crear_menu_principal()
         )
     else:
-        await message.answer("⚠ El bot ya está en funcionamiento")
+        await callback.answer("⚠ El bot ya está en funcionamiento", show_alert=True)
+    await callback.answer()
 
-@dp.message(Command("stop"))
-async def detener_bot(message: types.Message):
-    """Detiene el bot de trading"""
-    estado.activo = False
-    await message.answer(
-        "🛑 Bot de trading DETENIDO\n"
-        f"Operaciones activas: {len(estado.operaciones_activas)}"
-    )
-
-@dp.message(Command("status"))
-async def estado_actual(message: types.Message):
-    """Muestra el estado actual del bot"""
+@dp.callback_query(lambda c: c.data == "ver_balance")
+async def mostrar_balance(callback: types.CallbackQuery):
+    """Muestra el balance actual"""
     saldo = await obtener_saldo_disponible()
+    pares_viables = [p for p in PARES_OPERABLES if PARES_OPERABLES[p]["min_cantidad"] * 0.001 <= saldo * 0.9]
+    
+    await callback.message.edit_text(
+        f"💰 Balance Actual:\n"
+        f"• Saldo disponible: {saldo:.2f} USDT\n"
+        f"• Mínimo requerido: {CONFIG_GLOBAL['saldo_minimo']:.2f} USDT\n"
+        f"• Pares viables: {', '.join(pares_viables[:5])}...",
+        reply_markup=await crear_menu_principal()
+    )
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data.startswith("detalles_"))
+async def ver_detalles_operacion(callback: types.CallbackQuery):
+    """Muestra detalles de una operación específica"""
+    par = callback.data.replace("detalles_", "")
+    operacion = next((op for op in estado.operaciones_activas if op["par"] == par), None)
+    
+    if not operacion:
+        await callback.answer("Operación no encontrada", show_alert=True)
+        return
+    
+    duracion = (datetime.now() - operacion["hora_entrada"]).seconds // 60
+    ganancia_actual = ((operacion["max_precio"] - operacion["precio_entrada"]) / operacion["precio_entrada"]) * 100
     
     mensaje = (
-        "📊 Estado Actual\n"
-        f"• Bot: {'ACTIVO' if estado.activo else 'INACTIVO'}\n"
-        f"• Saldo: {saldo:.2f} USDT\n"
-        f"• Operaciones activas: {len(estado.operaciones_activas)}\n"
-        f"• Última señal: {estado.ultimas_operaciones.get(list(PARES_OPERABLES.keys())[0], 'N/A')}"
+        f"📊 Detalles de {par}\n"
+        f"🕒 Hora entrada: {operacion['hora_entrada'].strftime('%H:%M:%S')}\n"
+        f"⏱ Duración: {duracion} minutos\n"
+        f"💰 Precio entrada: {operacion['precio_entrada']:.8f}\n"
+        f"📈 Precio actual: {operacion['max_precio']:.8f}\n"
+        f"🚀 Ganancia actual: {ganancia_actual:.2f}%\n"
+        f"🎯 Take Profit: {operacion['take_profit']:.8f}\n"
+        f"🛑 Stop Loss: {operacion['stop_loss']:.8f}"
     )
     
-    await message.answer(mensaje)
+    await callback.message.edit_text(
+        mensaje,
+        reply_markup=await crear_menu_operacion(par)
+    )
+    await callback.answer()
 
 # =================================================================
 # FUNCIONES AUXILIARES
@@ -415,18 +414,6 @@ async def obtener_saldo_disponible():
         logger.error(f"Error obteniendo saldo: {e}")
         return 0.0
 
-async def guardar_historial():
-    """Guarda el historial de operaciones"""
-    try:
-        with open('historial_operaciones.json', 'w') as f:
-            json.dump(estado.historial, f, indent=4, default=str)
-    except Exception as e:
-        logger.error(f"Error guardando historial: {e}")
-
-# =================================================================
-# EJECUCIÓN PRINCIPAL
-# =================================================================
-
 async def main():
     """Función principal"""
     logger.info("=== INICIANDO BOT DE TRADING ===")
@@ -443,7 +430,6 @@ async def main():
     except Exception as e:
         logger.critical(f"Error al iniciar: {e}")
     finally:
-        await guardar_historial()
         await bot.session.close()
         logger.info("Bot detenido correctamente")
 
