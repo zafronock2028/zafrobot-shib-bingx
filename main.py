@@ -30,122 +30,122 @@ logging.basicConfig(
 logger = logging.getLogger("KuCoinProTrader")
 
 # =================================================================
-# CONFIGURACIÓN PROFESIONAL DE ESTRATEGIA (AJUSTADA PARA 35 USDT)
+# CONFIGURACIÓN OPTIMIZADA DE ESTRATEGIA
 # =================================================================
 
 PARES_CONFIG = {
     "SHIB-USDT": {
         "inc": 1000,
-        "min": 4.50,
-        "vol_min": 1500000,
-        "momentum_min": 0.008,
-        "cooldown": 20,
-        "max_ops_dia": 5,
-        "tp": 0.02,
-        "sl": 0.015,
+        "min": 3.80,
+        "vol_min": 1200000,
+        "momentum_min": 0.006,
+        "cooldown": 15,
+        "max_ops_dia": 6,
+        "tp": 0.022,
+        "sl": 0.013,
         "trailing_stop": True,
         "trailing_offset": 0.003
     },
     "PEPE-USDT": {
         "inc": 100000,
-        "min": 4.75,
-        "vol_min": 2000000,
-        "momentum_min": 0.009,
-        "cooldown": 25,
-        "max_ops_dia": 6,
-        "tp": 0.025,
-        "sl": 0.016,
+        "min": 4.20,
+        "vol_min": 1500000,
+        "momentum_min": 0.007,
+        "cooldown": 20,
+        "max_ops_dia": 7,
+        "tp": 0.028,
+        "sl": 0.015,
         "trailing_stop": True,
         "trailing_offset": 0.004
     },
     "FLOKI-USDT": {
         "inc": 1000,
-        "min": 4.25,
-        "vol_min": 1800000,
-        "momentum_min": 0.0085,
-        "cooldown": 30,
-        "max_ops_dia": 5,
-        "tp": 0.022,
-        "sl": 0.014,
+        "min": 3.80,
+        "vol_min": 1400000,
+        "momentum_min": 0.0065,
+        "cooldown": 25,
+        "max_ops_dia": 6,
+        "tp": 0.024,
+        "sl": 0.013,
         "trailing_stop": True,
         "trailing_offset": 0.0035
     },
     "WIF-USDT": {
         "inc": 1,
-        "min": 5.00,
-        "vol_min": 2500000,
-        "momentum_min": 0.012,
-        "cooldown": 20,
-        "max_ops_dia": 4,
-        "tp": 0.035,
-        "sl": 0.02,
+        "min": 4.50,
+        "vol_min": 2000000,
+        "momentum_min": 0.010,
+        "cooldown": 15,
+        "max_ops_dia": 5,
+        "tp": 0.038,
+        "sl": 0.018,
         "trailing_stop": True,
         "trailing_offset": 0.005
     },
     "BONK-USDT": {
         "inc": 10000,
-        "min": 4.80,
-        "vol_min": 3000000,
-        "momentum_min": 0.01,
-        "cooldown": 25,
-        "max_ops_dia": 5,
-        "tp": 0.03,
-        "sl": 0.018,
+        "min": 4.20,
+        "vol_min": 2500000,
+        "momentum_min": 0.008,
+        "cooldown": 20,
+        "max_ops_dia": 6,
+        "tp": 0.032,
+        "sl": 0.016,
         "trailing_stop": True,
         "trailing_offset": 0.004
     },
     "BTC3L-USDT": {
         "inc": 0.01,
-        "min": 8.50,
-        "vol_min": 5000000,
-        "momentum_min": 0.015,
-        "cooldown": 15,
-        "max_ops_dia": 3,
-        "tp": 0.05,
-        "sl": 0.03,
+        "min": 7.00,
+        "vol_min": 4000000,
+        "momentum_min": 0.012,
+        "cooldown": 12,
+        "max_ops_dia": 4,
+        "tp": 0.055,
+        "sl": 0.028,
         "trailing_stop": True,
         "trailing_offset": 0.006
     },
     "ETH3L-USDT": {
         "inc": 0.01,
-        "min": 7.75,
-        "vol_min": 4000000,
-        "momentum_min": 0.013,
-        "cooldown": 15,
-        "max_ops_dia": 3,
-        "tp": 0.045,
-        "sl": 0.025,
+        "min": 6.50,
+        "vol_min": 3500000,
+        "momentum_min": 0.011,
+        "cooldown": 12,
+        "max_ops_dia": 4,
+        "tp": 0.048,
+        "sl": 0.022,
         "trailing_stop": True,
         "trailing_offset": 0.005
     },
     "JUP-USDT": {
         "inc": 10,
-        "min": 5.25,
-        "vol_min": 2200000,
-        "momentum_min": 0.011,
-        "cooldown": 30,
-        "max_ops_dia": 4,
-        "tp": 0.028,
-        "sl": 0.017,
+        "min": 4.75,
+        "vol_min": 1800000,
+        "momentum_min": 0.009,
+        "cooldown": 25,
+        "max_ops_dia": 5,
+        "tp": 0.030,
+        "sl": 0.015,
         "trailing_stop": True,
         "trailing_offset": 0.003
     }
 }
 
 CONFIG = {
-    "uso_saldo": 0.82,
-    "max_operaciones": 1,
-    "intervalo_analisis": 10,
-    "saldo_minimo": 12.00,
-    "proteccion_ganancia": 0.015,
-    "lock_ganancia": 0.005,
-    "max_duracion": 20,
-    "max_slippage": 0.0015,
+    "uso_saldo": 0.85,
+    "max_operaciones": 2,
+    "intervalo_analisis": 8,
+    "saldo_minimo": 10.00,
+    "proteccion_ganancia": 0.012,
+    "lock_ganancia": 0.004,
+    "max_duracion": 25,
+    "max_slippage": 0.002,
     "hora_reseteo": "00:00"
 }
 
 # =================================================================
-# SISTEMA DE ESTADO AVANZADO (MANTENIDO SIN CAMBIOS)
+# SISTEMA DE ESTADO
 # =================================================================
 
 class EstadoTrading:
@@ -168,7 +168,7 @@ class EstadoTrading:
 estado = EstadoTrading()
 
 # =================================================================
-# MONITOR DE PRECIOS (WebSocket mejorado - SIN CAMBIOS)
+# MONITOR DE PRECIOS
 # =================================================================
 
 class PriceMonitor:
@@ -177,7 +177,6 @@ class PriceMonitor:
         self.ws_task = None
         
     async def conectar_websocket(self):
-        """Implementación mejorada de WebSocket"""
         while True:
             try:
                 await asyncio.sleep(1)
@@ -192,7 +191,7 @@ class PriceMonitor:
 price_monitor = PriceMonitor()
 
 # =================================================================
-# FUNCIONALIDADES CORE DEL BOT (MANTENIDAS SIN CAMBIOS)
+# CORE DEL BOT - FUNCIONES PRINCIPALES
 # =================================================================
 
 async def verificar_conexion_kucoin():
@@ -222,14 +221,6 @@ async def obtener_saldo_disponible():
         logger.error(f"Error obteniendo saldo: {e}")
         return 0.0
 
-async def guardar_historial():
-    try:
-        async with estado.lock:
-            with open('historial_operaciones.json', 'w') as f:
-                json.dump(estado.historial, f, indent=4, default=str)
-    except Exception as e:
-        logger.error(f"Error guardando historial: {e}")
-
 async def calcular_posicion(par, saldo_disponible, precio_entrada):
     try:
         config = PARES_CONFIG[par]
@@ -244,10 +235,7 @@ async def calcular_posicion(par, saldo_disponible, precio_entrada):
             logger.warning(f"Operación {par} bajo mínimo: {valor_operacion:.2f} < {config['min']}")
             return None
             
-        if valor_operacion < CONFIG["saldo_minimo"]:
-            return None
-            
-        return cantidad
+        return cantidad if valor_operacion >= CONFIG["saldo_minimo"] else None
         
     except Exception as e:
         logger.error(f"Error calculando posición {par}: {e}")
@@ -288,7 +276,7 @@ async def detectar_oportunidad(par):
 
         ticker = await asyncio.to_thread(market.get_ticker, par)
         spread = (float(ticker["bestAsk"]) - float(ticker["bestBid"])) / float(ticker["bestAsk"])
-        if spread > 0.0015:
+        if spread > 0.002:
             return None
 
         return {
@@ -358,7 +346,7 @@ async def ejecutar_operacion(señal):
         
         async with estado.lock:
             estado.operaciones_activas.append(operacion)
-            estado.cooldowns.add(operacion["par"])  # Solo se agrega a cooldown si se ejecuta
+            estado.cooldowns.add(operacion["par"])
             estado.contador_operaciones[señal["par"]] = estado.contador_operaciones.get(señal["par"], 0) + 1
             
         return operacion
@@ -476,8 +464,16 @@ async def verificar_slippage(par, precio_esperado):
         return False
     return True
 
+async def guardar_historial():
+    try:
+        async with estado.lock:
+            with open('historial_operaciones.json', 'w') as f:
+                json.dump(estado.historial, f, indent=4, default=str)
+    except Exception as e:
+        logger.error(f"Error guardando historial: {e}")
+
 # =================================================================
-# INTERFAZ DE TELEGRAM (Mejoras agregadas - SIN CAMBIOS)
+# INTERFAZ DE TELEGRAM
 # =================================================================
 
 async def notificar_operacion(operacion, tipo):
@@ -650,7 +646,7 @@ async def register_handlers(dp: Dispatcher):
             await callback.answer("⚠ Error obteniendo operaciones", show_alert=True)
 
 # =================================================================
-# CICLO PRINCIPAL Y EJECUCIÓN (CORRECCIÓN FINAL APLICADA)
+# CICLO PRINCIPAL
 # =================================================================
 
 async def ciclo_trading():
@@ -668,7 +664,7 @@ async def ciclo_trading():
             
             async with estado.lock:
                 if len(estado.operaciones_activas) < CONFIG["max_operaciones"]:
-                    logger.info(f"Verificando pares. Activas: {len(estado.operaciones_activas)}")
+                    logger.info(f"Escaneando {len(PARES_CONFIG)} pares | Operaciones activas: {len(estado.operaciones_activas)}")
                     for par in PARES_CONFIG:
                         if par in estado.pares_en_analisis:
                             continue
@@ -676,15 +672,18 @@ async def ciclo_trading():
                         estado.pares_en_analisis.add(par)
                         try:
                             if await verificar_cooldown(par):
+                                logger.debug(f"{par} en cooldown")
                                 continue
                                 
                             señal = await detectar_oportunidad(par)
-                            if señal and await verificar_slippage(par, señal["precio"]):
-                                operacion = await ejecutar_operacion(señal)
-                                if operacion:  # Solo sleep si se ejecutó operación
-                                    await asyncio.sleep(2)
+                            if señal:
+                                logger.info(f"Señal detectada en {par} | Momentum: {señal['momentum']:.4%}")
+                                if await verificar_slippage(par, señal["precio"]):
+                                    operacion = await ejecutar_operacion(señal)
+                                    if operacion:
+                                        await asyncio.sleep(1.5)
                         finally:
-                            estado.pares_en_analisis.discard(par)  # Aseguramos liberación del par
+                            estado.pares_en_analisis.discard(par)
             
             await asyncio.sleep(CONFIG["intervalo_analisis"])
             
