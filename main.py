@@ -358,7 +358,7 @@ async def ejecutar_operacion(señal):
         
         async with estado.lock:
             estado.operaciones_activas.append(operacion)
-            estado.cooldowns.add(operacion["par"])
+            estado.cooldowns.add(operacion["par"])  # Solo se agrega a cooldown si se ejecuta
             estado.contador_operaciones[señal["par"]] = estado.contador_operaciones.get(señal["par"], 0) + 1
             
         return operacion
@@ -678,10 +678,11 @@ async def ciclo_trading():
                                 
                             señal = await detectar_oportunidad(par)
                             if señal and await verificar_slippage(par, señal["precio"]):
-                                await ejecutar_operacion(señal)
-                                await asyncio.sleep(2)
+                                operacion = await ejecutar_operacion(señal)
+                                if operacion:  # Solo sleep si se ejecutó operación
+                                    await asyncio.sleep(2)
                         finally:
-                            estado.pares_en_analisis.discard(par)
+                            estado.pares_en_analisis.discard(par)  # Aseguramos liberación del par
             
             await asyncio.sleep(CONFIG["intervalo_analisis"])
             
@@ -692,7 +693,7 @@ async def ejecutar_bot():
     logger.info("=== INICIANDO BOT ===")
     global bot
     bot = Bot(token=os.getenv("TELEGRAM_TOKEN"))
-    dp = Dispatcher()  # 1. Dispatcher sin parámetro
+    dp = Dispatcher()
     
     try:
         await register_handlers(dp)
@@ -711,7 +712,7 @@ async def ejecutar_bot():
         except Exception as e:
             logger.error(f"Error cargando historial: {e}")
             
-        await dp.start_polling(bot)  # 2. Pasamos el bot como parámetro
+        await dp.start_polling(bot)
         
     except Exception as e:
         logger.critical(f"Error fatal: {e}")
