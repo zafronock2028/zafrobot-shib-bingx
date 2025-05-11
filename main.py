@@ -437,7 +437,7 @@ async def notificar_operacion(operacion, tipo):
                 f"📊 Cantidad: {operacion['cantidad']:.2f}\n"
                 f"💰 Precio: {operacion['precio_entrada']:.8f}\n"
                 f"🎯 TP: {operacion['take_profit']:.8f}\n"
-                f"🛑 SL: {operacion['stop_loss']:.8f}"
+                f"🛑 SL: {operacion['stop_loss']:.8f}"  # <-- aquí falta el cierre en tu versión original
             )
         else:
             ganancia_pct = ((operacion["precio_salida"] - operacion["precio_entrada"]) / operacion["precio_entrada"]) * 100
