@@ -45,7 +45,7 @@ PARES_CONFIG = {
         "sl": 0.013,
         "trailing_stop": True,
         "trailing_offset": 0.003,
-        "slippage": 0.0025
+        "slippage": 0.0125
     },
     "PEPE-USDT": {
         "inc": 100000,
@@ -58,7 +58,7 @@ PARES_CONFIG = {
         "sl": 0.015,
         "trailing_stop": True,
         "trailing_offset": 0.004,
-        "slippage": 0.0028
+        "slippage": 0.0135
     },
     "FLOKI-USDT": {
         "inc": 1000,
@@ -71,7 +71,7 @@ PARES_CONFIG = {
         "sl": 0.013,
         "trailing_stop": True,
         "trailing_offset": 0.0035,
-        "slippage": 0.0026
+        "slippage": 0.014
     },
     "WIF-USDT": {
         "inc": 1,
@@ -84,7 +84,7 @@ PARES_CONFIG = {
         "sl": 0.018,
         "trailing_stop": True,
         "trailing_offset": 0.005,
-        "slippage": 0.0030
+        "slippage": 0.011
     },
     "BONK-USDT": {
         "inc": 10000,
@@ -97,7 +97,7 @@ PARES_CONFIG = {
         "sl": 0.016,
         "trailing_stop": True,
         "trailing_offset": 0.004,
-        "slippage": 0.0027
+        "slippage": 0.013
     },
     "BTC3L-USDT": {
         "inc": 0.01,
@@ -110,7 +110,7 @@ PARES_CONFIG = {
         "sl": 0.028,
         "trailing_stop": True,
         "trailing_offset": 0.006,
-        "slippage": 0.0035
+        "slippage": 0.009
     },
     "ETH3L-USDT": {
         "inc": 0.01,
@@ -123,7 +123,7 @@ PARES_CONFIG = {
         "sl": 0.022,
         "trailing_stop": True,
         "trailing_offset": 0.005,
-        "slippage": 0.0032
+        "slippage": 0.009
     },
     "JUP-USDT": {
         "inc": 10,
@@ -136,7 +136,7 @@ PARES_CONFIG = {
         "sl": 0.015,
         "trailing_stop": True,
         "trailing_offset": 0.003,
-        "slippage": 0.0025
+        "slippage": 0.012
     }
 }
 
