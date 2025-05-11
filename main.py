@@ -619,12 +619,12 @@ async def ciclo_trading():
                                 operacion = await ejecutar_operacion(señal)
                                 if operacion:
                                     await asyncio.sleep(1.5)
-                                finally:
-            estado.pares_en_analisis.discard(par)
+                                                        finally:
+                            estado.pares_en_analisis.discard(par)
 
-        await asyncio.sleep(CONFIG["intervalo_analisis"])
-    except Exception as e:
-        logger.error(f"Error en ciclo trading: {e}")
+            await asyncio.sleep(CONFIG["intervalo_analisis"])
+        except Exception as e:
+            logger.error(f"Error en ciclo trading: {e}")
 
 async def actualizar_configuracion_inicial():
     logger.info("Actualizando configuración inicial...")
