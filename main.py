@@ -205,7 +205,7 @@ async def actualizar_configuracion_diaria():
             await asyncio.sleep(3600)
 
 # =================================================================
-# CORE DEL BOT - FUNCIONES DE TRADING (CON LOGS DIAGNÓSTICOS)
+# CORE DEL BOT - FUNCIONES DE TRADING (CON DIAGNÓSTICO)
 # =================================================================
 async def verificar_conexion_kucoin():
     try:
@@ -615,11 +615,11 @@ async def register_handlers(dp: Dispatcher):
             logger.error(f"Error mostrando operaciones: {e}")
 
 # =================================================================
-# CICLO PRINCIPAL DE TRADING (CON DIAGNÓSTICO COMPLETO)
+# CICLO PRINCIPAL DE TRADING (CON CORRECCIÓN DE BLOQUEO)
 # =================================================================
 async def ciclo_trading():
     logger.info("Iniciando ciclo de trading...")
-    logger.info(f"Pares configurados: {list(PARES_CONFIG.keys())}")  # Log crítico
+    logger.info(f"Pares configurados: {list(PARES_CONFIG.keys())}")
     
     while estado.activo:
         try:
@@ -633,27 +633,34 @@ async def ciclo_trading():
             async with estado.lock:
                 if len(estado.operaciones_activas) < CONFIG["max_operaciones"]:
                     logger.info("=== Iterando pares disponibles ===")
+                    logger.info(f"PARES DISPONIBLES: {list(PARES_CONFIG.keys())}")
+                    
                     for par in PARES_CONFIG:
                         if par in estado.pares_en_analisis:
+                            logger.info(f"SKIP {par} - Ya en análisis")
                             continue
                             
                         estado.pares_en_analisis.add(par)
                         try:
-                            logger.info(f"Analizando par: {par}")
+                            logger.info(f"Iniciando análisis de {par}")
                             
                             if await verificar_cooldown(par):
+                                logger.info(f"Cooldown activo en {par}")
                                 continue
                                 
                             señal = await detectar_oportunidad(par)
                             if señal:
-                                logger.info(f"Señal válida detectada en {par}")
+                                logger.info(f"Señal detectada en {par}")
                                 operacion = await ejecutar_operacion(señal)
                                 if operacion:
                                     await asyncio.sleep(1.5)
                             else:
-                                logger.info(f"Sin señales en {par}")
+                                logger.info(f"Sin señal en {par}")
+                        except Exception as e:
+                            logger.error(f"Error analizando {par}: {e}")
                         finally:
                             estado.pares_en_analisis.discard(par)
+                            logger.info(f"✔ Análisis completado: {par}")
             
             await asyncio.sleep(CONFIG["intervalo_analisis"])
         except Exception as e:
