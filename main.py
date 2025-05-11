@@ -259,28 +259,34 @@ async def detectar_oportunidad(par):
             secret=os.getenv("SECRET_KEY"),
             passphrase=os.getenv("API_PASSPHRASE")
         )
-        
+
         stats = await asyncio.to_thread(market.get_24h_stats, par)
         if float(stats["volValue"]) < PARES_CONFIG[par]["vol_min"]:
             return None
 
         now = int(datetime.utcnow().timestamp())
-start = now - 3 * 60  # últimos 3 minutos
-velas = await asyncio.to_thread(market.get_kline, par, "1min", start)
-velas = velas[-3:]  # tomar las últimas 3
+        start = now - 3 * 60  # últimos 3 minutos
+        end = now
 
-        if len(velas) < 3: return None
+        velas = await asyncio.to_thread(market.get_kline, par, "1min", start, end)
+        velas = velas[-3:]  # tomar las últimas 3
+
+        if len(velas) < 3:
+            return None
 
         cierres = [float(v[2]) for v in velas]
-        if not (cierres[2] > cierres[1] > cierres[0]): return None
+        if not (cierres[2] > cierres[1] > cierres[0]):
+            return None
 
         momentum = (cierres[2] - cierres[0]) / cierres[0]
-        if momentum < PARES_CONFIG[par]["momentum_min"]: return None
+        if momentum < PARES_CONFIG[par]["momentum_min"]:
+            return None
 
         ticker = await asyncio.to_thread(market.get_ticker, par)
         best_ask = float(ticker["bestAsk"])
         best_bid = float(ticker["bestBid"])
-        if (best_ask - best_bid) / best_ask > 0.002: return None
+        if (best_ask - best_bid) / best_ask > 0.002:
+            return None
 
         return {
             "par": par,
