@@ -614,34 +614,33 @@ async def register_handlers(dp: Dispatcher):
             logger.error(f"Error deteniendo bot: {e}")
 
     @dp.callback_query(lambda c: c.data == "ver_historial")
-    async def mostrar_historial(callback: types.CallbackQuery):
-        try:
-            if not estado.historial:
-                await callback.answer("No hay operaciones en el historial", show_alert=True)
-                return
-                
-            historial_reverso = estado.historial[-5:][::-1]
-            mensaje = "📜 Últimas 5 operaciones:\n\n"
-            
-            for op in historial_reverso:
-                ganancia = ((op["precio_salida"] - op["precio_entrada"]) / op["precio_entrada"]) * 100
-                duracion = (op["hora_salida"] - op["hora_entrada"]).seconds // 60
-mensaje += (
-    f"🔹 {op['par']} ({op['motivo_salida']})\n"
-    f"📈 {ganancia:.2f}% | ⏱ {duracion} min\n"
-    f"🕒 {op['hora_entrada'].strftime('%H:%M')} - {op['hora_salida'].strftime('%H:%M')}\n\n"
-)
-            
-            if callback.message.text != mensaje.strip():
-                await callback.message.edit_text(
-                    mensaje,
-                    reply_markup=await crear_menu_principal()
-                )
-            else:
-                await callback.answer("✅ Datos actualizados")
-                
-        except Exception as e:
-            logger.error(f"Error mostrando historial: {e}")
+async def mostrar_historial(callback: types.CallbackQuery):
+    try:
+        if not estado.historial:
+            await callback.answer("No hay operaciones en el historial", show_alert=True)
+            return
+
+        historial_reverso = estado.historial[-5:][::-1]
+        mensaje = "📜 Últimas 5 operaciones:\n\n"
+
+        for op in historial_reverso:
+            ganancia = ((op["precio_salida"] - op["precio_entrada"]) / op["precio_entrada"]) * 100
+            duracion = (op["hora_salida"] - op["hora_entrada"]).seconds // 60
+            mensaje += (
+                f"🔹 {op['par']} ({op['motivo_salida']})\n"
+                f"📈 {ganancia:.2f}% | ⏱ {duracion} min\n"
+                f"🕒 {op['hora_entrada'].strftime('%H:%M')} - {op['hora_salida'].strftime('%H:%M')}\n\n"
+            )
+
+        if callback.message.text != mensaje.strip():
+            await callback.message.edit_text(
+                mensaje,
+                reply_markup=await crear_menu_principal()
+            )
+        else:
+            await callback.answer("✅ Datos actualizados")
+    except Exception as e:
+        logger.error(f"Error mostrando historial: {e}")
 
     @dp.callback_query(lambda c: c.data == "ver_balance")
     async def mostrar_balance(callback: types.CallbackQuery):
