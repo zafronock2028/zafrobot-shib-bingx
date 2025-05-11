@@ -35,7 +35,7 @@ logging.basicConfig(
 logger = logging.getLogger("KuCoinProTrader")
 
 # =================================================================
-# CONFIGURACIÓN PRINCIPAL
+# CONFIGURACIÓN PRINCIPAL ACTUALIZADA
 # =================================================================
 CONFIG = {
     "uso_saldo": 0.85,
@@ -49,12 +49,12 @@ CONFIG = {
     "seleccion": {
         "volumen_minimo": 800000,
         "precio_minimo": 0.00001,
-        "spread_maximo": 0.002,
+        "spread_maximo": 0.004,
         "max_pares": 8,
         "config_base": {
             "min": 4.00,
-            "momentum_min": 0.0045,
-            "cooldown": 20,
+            "momentum_min": 0.0028,
+            "cooldown": 10,
             "max_ops_dia": 5,
             "tp": 0.025,
             "sl": 0.012,
@@ -144,23 +144,39 @@ async def obtener_pares_candidatos() -> List[Dict]:
         return []
 
 async def generar_nueva_configuracion(pares: List[Dict]) -> Dict:
-    nueva_config = {}
-    for par in pares:
-        symbol = par['symbol']
-        config = CONFIG["seleccion"]["config_base"].copy()
-        config['vol_min'] = par['volumen'] * 0.75
-        config['inc'] = determinar_incremento(symbol)
+    try:
+        market = Market()
+        todos_symbols = await asyncio.to_thread(market.get_symbol_list)
         
-        if '3L' in symbol:
+        nueva_config = {}
+        for par in pares:
+            symbol = par['symbol']
+            symbol_info = next((s for s in todos_symbols if s['symbol'] == symbol), None)
+            
+            if not symbol_info:
+                logger.error(f"Symbol {symbol} no encontrado, omitiendo")
+                continue
+                
+            config = CONFIG["seleccion"]["config_base"].copy()
             config.update({
-                'min': 7.00,
-                'momentum_min': 0.0085,
-                'tp': 0.045,
-                'sl': 0.022
+                'vol_min': par['volumen'] * 0.75,
+                'inc': determinar_incremento(symbol),
+                'minSize': float(symbol_info['baseMinSize'])
             })
-        
-        nueva_config[symbol] = config
-    return nueva_config
+            
+            if '3L' in symbol:
+                config.update({
+                    'min': 7.00,
+                    'momentum_min': 0.0085,
+                    'tp': 0.045,
+                    'sl': 0.022
+                })
+            
+            nueva_config[symbol] = config
+        return nueva_config
+    except Exception as e:
+        logger.error(f"Error generando configuración: {str(e)}")
+        return {}
 
 async def actualizar_configuracion_diaria():
     while True:
@@ -206,7 +222,7 @@ async def actualizar_configuracion_diaria():
             await asyncio.sleep(3600)
 
 # =================================================================
-# CORE DEL BOT - FUNCIONES DE TRADING (ACTUALIZADO)
+# CORE DEL BOT - FUNCIONES DE TRADING
 # =================================================================
 async def verificar_conexion_kucoin():
     try:
@@ -243,7 +259,10 @@ async def calcular_posicion(par, saldo_disponible, precio_entrada):
         cantidad = (cantidad // config["inc"]) * config["inc"]
         valor_operacion = cantidad * precio_entrada
         
-        # Nuevos logs detallados
+        if cantidad < config['minSize']:
+            logger.warning(f"{par} - Cantidad bajo mínimo exchange ({cantidad} < {config['minSize']})")
+            return None
+            
         logger.info(f"{par} - Incremento usado: {config['inc']}")
         logger.info(f"{par} - Cantidad calculada: {cantidad}")
         logger.info(f"{par} - Valor operación: {valor_operacion:.2f} USDT (mínimo: {config['min']})")
@@ -281,11 +300,17 @@ async def detectar_oportunidad(par):
             logger.info(f"DESCARTADO {par} - Menos de 3 velas disponibles")
             return None
 
+        umbral_volumen = (vol_actual / 1440) * 2
+        volumen_vela = float(velas[-1][5])
+        if volumen_vela < umbral_volumen:
+            logger.info(f"DESCARTADO {par} - Volumen de impulso bajo ({volumen_vela:.2f} < {umbral_volumen:.2f})")
+            return None
+
         cierres = [float(v[2]) for v in velas]
         logger.info(f"Analizando {par} - Cierres: {cierres}")
 
-        if not (cierres[2] > cierres[1] > cierres[0]):
-            logger.info(f"DESCARTADO {par} - Tendencia no alcista")
+        if cierres[2] < cierres[1] or cierres[1] < cierres[0]:
+            logger.info(f"DESCARTADO {par} - Tendencia de impulso rota")
             return None
 
         momentum = (cierres[2] - cierres[0]) / cierres[0]
@@ -322,7 +347,6 @@ async def ejecutar_operacion(señal):
         logger.info(f"🚀 Iniciando ejecución para {señal['par']}")
         logger.info(f"📈 Señal recibida: {señal}")
 
-        # Verificar límites de operaciones
         async with estado.lock:
             if len(estado.operaciones_activas) >= CONFIG["max_operaciones"]:
                 logger.warning("❌ Bloqueado - Máximo de operaciones simultáneas alcanzado")
@@ -333,7 +357,6 @@ async def ejecutar_operacion(señal):
                 logger.warning(f"❌ Bloqueado - Límite diario ({ops_diarias}/{PARES_CONFIG[señal['par']]['max_ops_dia']})")
                 return None
 
-        # Obtener y validar saldo
         saldo = await obtener_saldo_disponible()
         logger.info(f"💰 Saldo disponible: {saldo:.2f} USDT")
         
@@ -341,7 +364,6 @@ async def ejecutar_operacion(señal):
             logger.warning(f"❌ Saldo insuficiente ({saldo:.2f} < {CONFIG['saldo_minimo']})")
             return None
 
-        # Calcular posición
         cantidad = await calcular_posicion(señal["par"], saldo, señal["precio"])
         logger.info(f"🧮 Cálculo posición: {cantidad or 'NO VÁLIDA'}")
         
@@ -349,7 +371,6 @@ async def ejecutar_operacion(señal):
             logger.warning("❌ Abortando - Cantidad no válida")
             return None
 
-        # Validar montos mínimos
         valor_operacion = cantidad * señal["precio"]
         min_operacion = PARES_CONFIG[señal["par"]]["min"]
         logger.info(f"📦 Valor operación: {valor_operacion:.2f} USDT (Mínimo requerido: {min_operacion} USDT)")
@@ -358,7 +379,6 @@ async def ejecutar_operacion(señal):
             logger.warning(f"❌ Abortando - Valor bajo el mínimo ({valor_operacion:.2f} < {min_operacion})")
             return None
 
-        # Ejecutar orden
         try:
             trade = Trade(
                 key=os.getenv("API_KEY"),
@@ -371,7 +391,6 @@ async def ejecutar_operacion(señal):
             logger.info(f"✅ Orden ejecutada - ID: {orden['orderId']}")
             logger.debug(f"Respuesta completa de KuCoin: {orden}")
             
-            # Manejo de precio actualizado
             precio_entrada = orden.get("price")
             if not precio_entrada:
                 precio_entrada = señal["precio"]
@@ -384,7 +403,6 @@ async def ejecutar_operacion(señal):
             await notificar_error(f"Error en orden de {señal['par']}:\n{str(e)}")
             return None
 
-        # Registrar operación
         operacion = {
             "par": señal["par"],
             "id_orden": orden["orderId"],
