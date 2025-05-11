@@ -222,7 +222,7 @@ async def actualizar_configuracion_diaria():
             await asyncio.sleep(3600)
 
 # =================================================================
-# CORE DEL BOT - FUNCIONES DE TRADING
+# CORE DEL BOT - FUNCIONES DE TRADING ACTUALIZADAS
 # =================================================================
 async def verificar_conexion_kucoin():
     try:
@@ -259,8 +259,18 @@ async def calcular_posicion(par, saldo_disponible, precio_entrada):
         cantidad = (cantidad // config["inc"]) * config["inc"]
         valor_operacion = cantidad * precio_entrada
         
+        mensaje_base = (
+            f"❌ {par} - Operación abortada:\n"
+            f"• Cantidad calculada: {cantidad}\n"
+            f"• Mínimo KuCoin: {config['minSize']}\n"
+            f"• Valor operación: {valor_operacion:.2f} USDT\n"
+            f"• Mínimo config: {config['min']} USDT"
+        )
+
         if cantidad < config['minSize']:
-            logger.warning(f"{par} - Cantidad bajo mínimo exchange ({cantidad} < {config['minSize']})")
+            logger.warning(f"{par} - Cantidad bajo mínimo KuCoin ({cantidad} < {config['minSize']})")
+            await notificar_error(f"{par} - Cantidad menor al mínimo permitido\n{cantidad} < {config['minSize']}")
+            await notificar_error(mensaje_base)
             return None
             
         logger.info(f"{par} - Incremento usado: {config['inc']}")
@@ -269,11 +279,19 @@ async def calcular_posicion(par, saldo_disponible, precio_entrada):
         
         if valor_operacion < config["min"]:
             logger.warning(f"{par} - Operación bajo mínimo ({valor_operacion:.2f} < {config['min']})")
+            await notificar_error(mensaje_base)
+            return None
+
+        if valor_operacion < CONFIG["saldo_minimo"]:
+            logger.warning(f"{par} - Valor bajo mínimo de saldo ({valor_operacion:.2f} < {CONFIG['saldo_minimo']})")
+            await notificar_error(f"❌ {par} - Saldo insuficiente\nValor operación: {valor_operacion:.2f} < {CONFIG['saldo_minimo']} USDT")
             return None
             
-        return cantidad if valor_operacion >= CONFIG["saldo_minimo"] else None
+        return cantidad
     except Exception as e:
-        logger.error(f"Error calculando posición {par}: {e}")
+        error_msg = f"❌ Error cálculo posición {par}: {str(e)}"
+        logger.error(error_msg)
+        await notificar_error(error_msg)
         return None
 
 async def detectar_oportunidad(par):
@@ -361,7 +379,9 @@ async def ejecutar_operacion(señal):
         logger.info(f"💰 Saldo disponible: {saldo:.2f} USDT")
         
         if saldo < CONFIG["saldo_minimo"]:
-            logger.warning(f"❌ Saldo insuficiente ({saldo:.2f} < {CONFIG['saldo_minimo']})")
+            error_msg = f"❌ Saldo insuficiente en cuenta\n{saldo:.2f} < {CONFIG['saldo_minimo']} USDT"
+            logger.warning(error_msg)
+            await notificar_error(error_msg)
             return None
 
         cantidad = await calcular_posicion(señal["par"], saldo, señal["precio"])
