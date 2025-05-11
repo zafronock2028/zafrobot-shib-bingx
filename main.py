@@ -638,7 +638,20 @@ async def ejecutar_bot():
     
     try:
         await register_handlers(dp)
-        asyncio.create_task(actualizar_configuracion_diaria())
+
+# Ejecuta la configuración inicial de pares
+pares_iniciales = await obtener_pares_candidatos()
+nueva_config = await generar_nueva_configuracion(pares_iniciales)
+
+if nueva_config:
+    global PARES_CONFIG
+    PARES_CONFIG.update(nueva_config)
+    logger.info(f"Pares configurados: {list(PARES_CONFIG.keys())}")
+else:
+    logger.error("No se pudieron cargar pares iniciales.")
+
+# Inicia el ciclo de actualización diaria
+asyncio.create_task(actualizar_configuracion_diaria())
         
         if not await verificar_conexion_kucoin():
             logger.error("Error de conexión inicial con KuCoin")
