@@ -44,7 +44,8 @@ PARES_CONFIG = {
         "tp": 0.022,
         "sl": 0.013,
         "trailing_stop": True,
-        "trailing_offset": 0.003
+        "trailing_offset": 0.003,
+        "slippage": 0.0025
     },
     "PEPE-USDT": {
         "inc": 100000,
@@ -56,7 +57,8 @@ PARES_CONFIG = {
         "tp": 0.028,
         "sl": 0.015,
         "trailing_stop": True,
-        "trailing_offset": 0.004
+        "trailing_offset": 0.004,
+        "slippage": 0.0028
     },
     "FLOKI-USDT": {
         "inc": 1000,
@@ -68,7 +70,8 @@ PARES_CONFIG = {
         "tp": 0.024,
         "sl": 0.013,
         "trailing_stop": True,
-        "trailing_offset": 0.0035
+        "trailing_offset": 0.0035,
+        "slippage": 0.0026
     },
     "WIF-USDT": {
         "inc": 1,
@@ -80,7 +83,8 @@ PARES_CONFIG = {
         "tp": 0.038,
         "sl": 0.018,
         "trailing_stop": True,
-        "trailing_offset": 0.005
+        "trailing_offset": 0.005,
+        "slippage": 0.0030
     },
     "BONK-USDT": {
         "inc": 10000,
@@ -92,7 +96,8 @@ PARES_CONFIG = {
         "tp": 0.032,
         "sl": 0.016,
         "trailing_stop": True,
-        "trailing_offset": 0.004
+        "trailing_offset": 0.004,
+        "slippage": 0.0027
     },
     "BTC3L-USDT": {
         "inc": 0.01,
@@ -104,7 +109,8 @@ PARES_CONFIG = {
         "tp": 0.055,
         "sl": 0.028,
         "trailing_stop": True,
-        "trailing_offset": 0.006
+        "trailing_offset": 0.006,
+        "slippage": 0.0035
     },
     "ETH3L-USDT": {
         "inc": 0.01,
@@ -116,7 +122,8 @@ PARES_CONFIG = {
         "tp": 0.048,
         "sl": 0.022,
         "trailing_stop": True,
-        "trailing_offset": 0.005
+        "trailing_offset": 0.005,
+        "slippage": 0.0032
     },
     "JUP-USDT": {
         "inc": 10,
@@ -128,7 +135,8 @@ PARES_CONFIG = {
         "tp": 0.030,
         "sl": 0.015,
         "trailing_stop": True,
-        "trailing_offset": 0.003
+        "trailing_offset": 0.003,
+        "slippage": 0.0025
     }
 }
 
@@ -459,7 +467,7 @@ async def verificar_slippage(par, precio_esperado):
     best_ask = float(ticker["bestAsk"])
     
     slippage = abs(best_ask - precio_esperado) / precio_esperado
-    if slippage > CONFIG["max_slippage"]:
+    if slippage > PARES_CONFIG[par]["slippage"]:  # Usamos el slippage específico del par
         logger.warning(f"Slippage excesivo en {par}: {slippage:.4%}")
         return False
     return True
@@ -551,7 +559,6 @@ async def register_handlers(dp: Dispatcher):
         estado.activo = False
         await message.answer("🛑 Bot detenido manualmente")
 
-    # Handler corregido: mismo nivel que los demás
     @dp.callback_query(lambda c: c.data == "iniciar_bot")
     async def iniciar_bot(callback: types.CallbackQuery):
         try:
