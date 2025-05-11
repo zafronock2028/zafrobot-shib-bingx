@@ -625,11 +625,12 @@ async def register_handlers(dp: Dispatcher):
             
             for op in historial_reverso:
                 ganancia = ((op["precio_salida"] - op["precio_entrada"]) / op["precio_entrada"]) * 100
-                mensaje += (
-                    f"🔹 {op['par']} ({op['motivo_salida']})\n"
-                    f"📈 {ganancia:.2f}% | ⏱ {((op['hora_salida'] - op['hora_entrada']).seconds // 60} min\n"
-                    f"🕒 {op['hora_entrada'].strftime('%H:%M')} - {op['hora_salida'].strftime('%H:%M')}\n\n"
-                )
+                duracion = (op["hora_salida"] - op["hora_entrada"]).seconds // 60
+mensaje += (
+    f"🔹 {op['par']} ({op['motivo_salida']})\n"
+    f"📈 {ganancia:.2f}% | ⏱ {duracion} min\n"
+    f"🕒 {op['hora_entrada'].strftime('%H:%M')} - {op['hora_salida'].strftime('%H:%M')}\n\n"
+)
             
             if callback.message.text != mensaje.strip():
                 await callback.message.edit_text(
