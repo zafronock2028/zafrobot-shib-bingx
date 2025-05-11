@@ -12,13 +12,17 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Validación de variables de entorno
+# =================================================================
+# VALIDACIÓN DE VARIABLES DE ENTORNO
+# =================================================================
 REQUIRED_ENV_VARS = ["TELEGRAM_TOKEN", "CHAT_ID", "API_KEY", "SECRET_KEY", "API_PASSPHRASE"]
 missing_vars = [var for var in REQUIRED_ENV_VARS if not os.getenv(var)]
 if missing_vars:
     raise EnvironmentError(f"Faltan variables de entorno: {', '.join(missing_vars)}")
 
-# Configuración de logging
+# =================================================================
+# CONFIGURACIÓN DE LOGGING
+# =================================================================
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -32,7 +36,6 @@ logger = logging.getLogger("KuCoinProTrader")
 # =================================================================
 # CONFIGURACIÓN PRINCIPAL
 # =================================================================
-
 CONFIG = {
     "uso_saldo": 0.85,
     "max_operaciones": 2,
@@ -66,7 +69,6 @@ PARES_CONFIG = {}
 # =================================================================
 # SISTEMA DE ESTADO
 # =================================================================
-
 class EstadoTrading:
     def __init__(self):
         self.operaciones_activas = []
@@ -87,9 +89,8 @@ class EstadoTrading:
 estado = EstadoTrading()
 
 # =================================================================
-# MÓDULO DE SELECCIÓN DINÁMICA DE PARES
+# MÓDULO DE SELECCIÓN DE PARES
 # =================================================================
-
 def determinar_incremento(simbolo: str) -> float:
     simbolo = simbolo.upper()
     if '3L' in simbolo: return 0.01
@@ -171,7 +172,6 @@ async def actualizar_configuracion_diaria():
             
             await asyncio.sleep((next_reset - now).total_seconds())
             
-            # Actualizar pares y configuración
             pares_candidatos = await obtener_pares_candidatos()
             nueva_config = await generar_nueva_configuracion(pares_candidatos)
             
@@ -186,7 +186,6 @@ async def actualizar_configuracion_diaria():
                 estado.contador_operaciones.clear()
                 estado.cooldowns.clear()
             
-            # Actualizar volúmenes
             market = Market()
             for par in PARES_CONFIG:
                 try:
@@ -208,7 +207,6 @@ async def actualizar_configuracion_diaria():
 # =================================================================
 # CORE DEL BOT - FUNCIONES DE TRADING
 # =================================================================
-
 async def verificar_conexion_kucoin():
     try:
         market = Market()
@@ -264,7 +262,6 @@ async def detectar_oportunidad(par):
         if float(stats["volValue"]) < PARES_CONFIG[par]["vol_min"]:
             return None
 
-        # Llamada corregida al método get_kline con 3 parámetros
         velas = await asyncio.to_thread(market.get_kline, par, "1min", 3)
 
         if len(velas) < 3:
@@ -430,7 +427,6 @@ async def guardar_historial():
 # =================================================================
 # INTERFAZ DE TELEGRAM
 # =================================================================
-
 async def notificar_operacion(operacion, tipo):
     try:
         if tipo == "ENTRADA":
@@ -596,9 +592,8 @@ async def register_handlers(dp: Dispatcher):
             logger.error(f"Error mostrando operaciones: {e}")
 
 # =================================================================
-# CICLO PRINCIPAL DE TRADING (CORREGIDO)
+# CICLO PRINCIPAL DE TRADING
 # =================================================================
-
 async def ciclo_trading():
     logger.info("Iniciando ciclo de trading...")
     while estado.activo:
@@ -635,7 +630,6 @@ async def ciclo_trading():
 # =================================================================
 # EJECUCIÓN PRINCIPAL
 # =================================================================
-
 async def ejecutar_bot():
     logger.info("=== INICIANDO BOT ===")
     global bot
@@ -645,7 +639,6 @@ async def ejecutar_bot():
     try:
         await register_handlers(dp)
 
-        # Ejecución de configuración inicial
         pares_iniciales = await obtener_pares_candidatos()
         nueva_config = await generar_nueva_configuracion(pares_iniciales)
 
@@ -662,14 +655,10 @@ async def ejecutar_bot():
             logger.error("Error de conexión inicial con KuCoin")
             return
 
-        # Cargar historial si existe
-        try:
-            if os.path.exists('historial_operaciones.json') and os.path.getsize('historial_operaciones.json') > 0:
-                with open('historial_operaciones.json', 'r') as f:
-                    estado.historial = json.load(f)
-                logger.info(f"Historial cargado ({len(estado.historial)} ops)")
-        except Exception as e:
-            logger.error(f"Error cargando historial: {e}")
+        if os.path.exists('historial_operaciones.json') and os.path.getsize('historial_operaciones.json') > 0:
+            with open('historial_operaciones.json', 'r') as f:
+                estado.historial = json.load(f)
+            logger.info(f"Historial cargado ({len(estado.historial)} ops)")
 
         await dp.start_polling(bot)
 
