@@ -39,27 +39,27 @@ logger = logging.getLogger("KuCoinProTrader")
 # =================================================================
 CONFIG = {
     "uso_saldo": 0.85,
-    "max_operaciones": 2,
-    "intervalo_analisis": 8,
-    "saldo_minimo": 10.00,
-    "proteccion_ganancia": 0.012,
-    "lock_ganancia": 0.004,
+    "max_operaciones": 3,
+    "intervalo_analisis": 6,
+    "saldo_minimo": 5.00,
+    "proteccion_ganancia": 0.010,
+    "lock_ganancia": 0.003,
     "max_duracion": 25,
     "hora_reseteo": "00:00",
     "seleccion": {
-        "volumen_minimo": 300000,         # más permisivo para detectar más pares
-        "precio_minimo": 0.000005,        # permite monedas más baratas
-        "spread_maximo": 0.0055,          # tolera un spread un poco más alto
-        "max_pares": 10,
+        "volumen_minimo": 250000,
+        "precio_minimo": 0.000003,
+        "spread_maximo": 0.006,
+        "max_pares": 12,
         "config_base": {
-            "min": 3.00,
-            "momentum_min": 0.0023,       # más sensible a impulsos débiles
-            "cooldown": 8,
-            "max_ops_dia": 6,
-            "tp": 0.021,
-            "sl": 0.011,
+            "min": 2.50,
+            "momentum_min": 0.0020,
+            "cooldown": 6,
+            "max_ops_dia": 8,
+            "tp": 0.018,
+            "sl": 0.0095,
             "trailing_stop": True,
-            "trailing_offset": 0.0028,
+            "trailing_offset": 0.0026,
             "slippage": 0.0025
         }
     }
