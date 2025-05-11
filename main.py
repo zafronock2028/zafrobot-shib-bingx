@@ -205,7 +205,7 @@ async def actualizar_configuracion_diaria():
             await asyncio.sleep(3600)
 
 # =================================================================
-# CORE DEL BOT - FUNCIONES DE TRADING
+# CORE DEL BOT - FUNCIONES DE TRADING (CORRECTO)
 # =================================================================
 async def verificar_conexion_kucoin():
     try:
@@ -262,7 +262,9 @@ async def detectar_oportunidad(par):
         if float(stats["volValue"]) < PARES_CONFIG[par]["vol_min"]:
             return None
 
-        velas = await asyncio.to_thread(market.get_kline, par, "1min", 3)
+        # CORRECCIÓN DEFINITIVA: 2 argumentos + slicing
+        velas = await asyncio.to_thread(market.get_kline, par, "1min")
+        velas = velas[-3:]  # Tomar últimas 3 velas
 
         if len(velas) < 3:
             return None
