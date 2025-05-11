@@ -47,19 +47,19 @@ CONFIG = {
     "max_duracion": 25,
     "hora_reseteo": "00:00",
     "seleccion": {
-        "volumen_minimo": 800000,
-        "precio_minimo": 0.00001,
-        "spread_maximo": 0.004,
-        "max_pares": 8,
+        "volumen_minimo": 300000,         # más permisivo para detectar más pares
+        "precio_minimo": 0.000005,        # permite monedas más baratas
+        "spread_maximo": 0.0055,          # tolera un spread un poco más alto
+        "max_pares": 10,
         "config_base": {
-            "min": 4.00,
-            "momentum_min": 0.0028,
-            "cooldown": 10,
-            "max_ops_dia": 5,
-            "tp": 0.025,
-            "sl": 0.012,
+            "min": 3.00,
+            "momentum_min": 0.0023,       # más sensible a impulsos débiles
+            "cooldown": 8,
+            "max_ops_dia": 6,
+            "tp": 0.021,
+            "sl": 0.011,
             "trailing_stop": True,
-            "trailing_offset": 0.003,
+            "trailing_offset": 0.0028,
             "slippage": 0.0025
         }
     }
