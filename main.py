@@ -264,7 +264,11 @@ async def detectar_oportunidad(par):
         if float(stats["volValue"]) < PARES_CONFIG[par]["vol_min"]:
             return None
 
-        velas = await asyncio.to_thread(market.get_kline_with_limit, par, "1min", 3)
+        now = int(datetime.utcnow().timestamp())
+start = now - 3 * 60  # últimos 3 minutos
+velas = await asyncio.to_thread(market.get_kline, par, "1min", start)
+velas = velas[-3:]  # tomar las últimas 3
+
         if len(velas) < 3: return None
 
         cierres = [float(v[2]) for v in velas]
