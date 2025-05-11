@@ -635,28 +635,28 @@ async def ejecutar_bot():
     global bot
     bot = Bot(token=os.getenv("TELEGRAM_TOKEN"))
     dp = Dispatcher()
-    
+
     try:
         await register_handlers(dp)
 
-# Ejecuta la configuración inicial de pares
-pares_iniciales = await obtener_pares_candidatos()
-nueva_config = await generar_nueva_configuracion(pares_iniciales)
+        # Ejecución de configuración inicial
+        pares_iniciales = await obtener_pares_candidatos()
+        nueva_config = await generar_nueva_configuracion(pares_iniciales)
 
-if nueva_config:
-    global PARES_CONFIG
-    PARES_CONFIG.update(nueva_config)
-    logger.info(f"Pares configurados: {list(PARES_CONFIG.keys())}")
-else:
-    logger.error("No se pudieron cargar pares iniciales.")
+        if nueva_config:
+            global PARES_CONFIG
+            PARES_CONFIG.update(nueva_config)
+            logger.info(f"Pares configurados: {list(PARES_CONFIG.keys())}")
+        else:
+            logger.error("No se pudieron cargar pares iniciales.")
 
-# Inicia el ciclo de actualización diaria
-asyncio.create_task(actualizar_configuracion_diaria())
-        
+        asyncio.create_task(actualizar_configuracion_diaria())
+
         if not await verificar_conexion_kucoin():
             logger.error("Error de conexión inicial con KuCoin")
             return
-            
+
+        # Cargar historial si existe
         try:
             if os.path.exists('historial_operaciones.json') and os.path.getsize('historial_operaciones.json') > 0:
                 with open('historial_operaciones.json', 'r') as f:
@@ -664,9 +664,9 @@ asyncio.create_task(actualizar_configuracion_diaria())
                 logger.info(f"Historial cargado ({len(estado.historial)} ops)")
         except Exception as e:
             logger.error(f"Error cargando historial: {e}")
-            
+
         await dp.start_polling(bot)
-        
+
     except Exception as e:
         logger.critical(f"Error fatal: {e}")
     finally:
