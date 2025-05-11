@@ -45,7 +45,7 @@ PARES_CONFIG = {
         "sl": 0.013,
         "trailing_stop": True,
         "trailing_offset": 0.003,
-        "slippage": 0.0125
+        "slippage": 0.0025
     },
     "PEPE-USDT": {
         "inc": 100000,
@@ -58,7 +58,7 @@ PARES_CONFIG = {
         "sl": 0.015,
         "trailing_stop": True,
         "trailing_offset": 0.004,
-        "slippage": 0.0135
+        "slippage": 0.0028
     },
     "FLOKI-USDT": {
         "inc": 1000,
@@ -71,7 +71,7 @@ PARES_CONFIG = {
         "sl": 0.013,
         "trailing_stop": True,
         "trailing_offset": 0.0035,
-        "slippage": 0.014
+        "slippage": 0.0026
     },
     "WIF-USDT": {
         "inc": 1,
@@ -84,7 +84,7 @@ PARES_CONFIG = {
         "sl": 0.018,
         "trailing_stop": True,
         "trailing_offset": 0.005,
-        "slippage": 0.011
+        "slippage": 0.0030
     },
     "BONK-USDT": {
         "inc": 10000,
@@ -97,7 +97,7 @@ PARES_CONFIG = {
         "sl": 0.016,
         "trailing_stop": True,
         "trailing_offset": 0.004,
-        "slippage": 0.013
+        "slippage": 0.0027
     },
     "BTC3L-USDT": {
         "inc": 0.01,
@@ -110,7 +110,7 @@ PARES_CONFIG = {
         "sl": 0.028,
         "trailing_stop": True,
         "trailing_offset": 0.006,
-        "slippage": 0.009
+        "slippage": 0.0035
     },
     "ETH3L-USDT": {
         "inc": 0.01,
@@ -123,7 +123,7 @@ PARES_CONFIG = {
         "sl": 0.022,
         "trailing_stop": True,
         "trailing_offset": 0.005,
-        "slippage": 0.009
+        "slippage": 0.0032
     },
     "JUP-USDT": {
         "inc": 10,
@@ -136,7 +136,7 @@ PARES_CONFIG = {
         "sl": 0.015,
         "trailing_stop": True,
         "trailing_offset": 0.003,
-        "slippage": 0.012
+        "slippage": 0.0025
     }
 }
 
@@ -239,8 +239,13 @@ async def calcular_posicion(par, saldo_disponible, precio_entrada):
         
         valor_operacion = cantidad * precio_entrada
         
+        logger.info(f"{par} - Cálculo posición: "
+                   f"Cantidad={cantidad:.8f}, "
+                   f"Valor={valor_operacion:.2f} USDT, "
+                   f"Mínimo={config['min']} USDT")
+        
         if valor_operacion < config["min"]:
-            logger.warning(f"Operación {par} bajo mínimo: {valor_operacion:.2f} < {config['min']}")
+            logger.warning(f"{par} - Operación bajo mínimo: {valor_operacion:.2f} < {config['min']}")
             return None
             
         return cantidad if valor_operacion >= CONFIG["saldo_minimo"] else None
@@ -252,6 +257,7 @@ async def calcular_posicion(par, saldo_disponible, precio_entrada):
 async def detectar_oportunidad(par):
     try:
         if not await verificar_conexion_kucoin():
+            logger.warning(f"{par} - Descartado: Error de conexión")
             return None
 
         market = Market(
@@ -261,7 +267,9 @@ async def detectar_oportunidad(par):
         )
         
         stats = await asyncio.to_thread(market.get_24h_stats, par)
-        if float(stats["volValue"]) < PARES_CONFIG[par]["vol_min"]:
+        volumen_actual = float(stats["volValue"])
+        if volumen_actual < PARES_CONFIG[par]["vol_min"]:
+            logger.warning(f"{par} - Descartado: Volumen insuficiente ({volumen_actual:.2f} < {PARES_CONFIG[par]['vol_min']})")
             return None
 
         velas = await asyncio.to_thread(
@@ -272,19 +280,25 @@ async def detectar_oportunidad(par):
         )
         
         if len(velas) < 3:
+            logger.warning(f"{par} - Descartado: Datos insuficientes ({len(velas)} velas)")
             return None
 
         cierres = [float(v[2]) for v in velas]
         if not (cierres[2] > cierres[1] > cierres[0]):
+            logger.warning(f"{par} - Descartado: Tendencia no alcista ({cierres[0]} > {cierres[1]} > {cierres[2]})")
             return None
 
         momentum = (cierres[2] - cierres[0]) / cierres[0]
         if momentum < PARES_CONFIG[par]["momentum_min"]:
+            logger.warning(f"{par} - Descartado: Momentum insuficiente ({momentum:.4%} < {PARES_CONFIG[par]['momentum_min']:.4%})")
             return None
 
         ticker = await asyncio.to_thread(market.get_ticker, par)
-        spread = (float(ticker["bestAsk"]) - float(ticker["bestBid"])) / float(ticker["bestAsk"])
+        best_ask = float(ticker["bestAsk"])
+        best_bid = float(ticker["bestBid"])
+        spread = (best_ask - best_bid) / best_ask
         if spread > 0.002:
+            logger.warning(f"{par} - Descartado: Spread demasiado alto ({spread:.4%})")
             return None
 
         return {
@@ -467,7 +481,7 @@ async def verificar_slippage(par, precio_esperado):
     best_ask = float(ticker["bestAsk"])
     
     slippage = abs(best_ask - precio_esperado) / precio_esperado
-    if slippage > PARES_CONFIG[par]["slippage"]:  # Usamos el slippage específico del par
+    if slippage > PARES_CONFIG[par]["slippage"]:
         logger.warning(f"Slippage excesivo en {par}: {slippage:.4%}")
         return False
     return True
@@ -584,8 +598,20 @@ async def register_handlers(dp: Dispatcher):
 
     @dp.callback_query(lambda c: c.data == "detener_bot")
     async def detener_bot(callback: types.CallbackQuery):
-        estado.activo = False
-        await callback.message.edit_text("🛑 Bot detenido", reply_markup=await crear_menu_principal())
+        try:
+            estado.activo = False
+            mensaje = "🛑 Bot detenido"
+            
+            if callback.message.text != mensaje:
+                await callback.message.edit_text(
+                    mensaje,
+                    reply_markup=await crear_menu_principal()
+                )
+            else:
+                await callback.answer("✅ Bot ya estaba detenido")
+                
+        except Exception as e:
+            logger.error(f"Error deteniendo bot: {e}")
 
     @dp.callback_query(lambda c: c.data == "ver_historial")
     async def mostrar_historial(callback: types.CallbackQuery):
@@ -601,14 +627,18 @@ async def register_handlers(dp: Dispatcher):
                 ganancia = ((op["precio_salida"] - op["precio_entrada"]) / op["precio_entrada"]) * 100
                 mensaje += (
                     f"🔹 {op['par']} ({op['motivo_salida']})\n"
-                    f"📈 {ganancia:.2f}% | ⏱ {((op['hora_salida'] - op['hora_entrada']).seconds // 60)} min\n"
+                    f"📈 {ganancia:.2f}% | ⏱ {((op['hora_salida'] - op['hora_entrada']).seconds // 60} min\n"
                     f"🕒 {op['hora_entrada'].strftime('%H:%M')} - {op['hora_salida'].strftime('%H:%M')}\n\n"
                 )
+            
+            if callback.message.text != mensaje.strip():
+                await callback.message.edit_text(
+                    mensaje,
+                    reply_markup=await crear_menu_principal()
+                )
+            else:
+                await callback.answer("✅ Datos actualizados")
                 
-            await callback.message.edit_text(
-                mensaje,
-                reply_markup=await crear_menu_principal()
-            )
         except Exception as e:
             logger.error(f"Error mostrando historial: {e}")
 
@@ -616,11 +646,15 @@ async def register_handlers(dp: Dispatcher):
     async def mostrar_balance(callback: types.CallbackQuery):
         try:
             saldo = await obtener_saldo_disponible()
-            await callback.message.edit_text(
-                f"💰 Balance disponible: {saldo:.2f} USDT",
-                reply_markup=await crear_menu_principal()
-            )
+            mensaje = f"💰 Balance disponible: {saldo:.2f} USDT"
+            
+            if callback.message.text != mensaje:
+                await callback.message.edit_text(
+                    mensaje,
+                    reply_markup=await crear_menu_principal()
+                )
             await callback.answer()
+            
         except Exception as e:
             logger.error(f"Error mostrando balance: {e}")
             await callback.answer("⚠ Error obteniendo balance", show_alert=True)
@@ -648,11 +682,14 @@ async def register_handlers(dp: Dispatcher):
                     f"• Hora entrada: {op['hora_entrada'].strftime('%H:%M:%S')}\n\n"
                 )
             
-            await callback.message.edit_text(
-                mensaje,
-                reply_markup=await crear_menu_principal()
-            )
-            await callback.answer()
+            if callback.message.text != mensaje.strip():
+                await callback.message.edit_text(
+                    mensaje,
+                    reply_markup=await crear_menu_principal()
+                )
+            else:
+                await callback.answer("✅ Datos actualizados")
+                
         except Exception as e:
             logger.error(f"Error mostrando operaciones: {e}")
             await callback.answer("⚠ Error obteniendo operaciones", show_alert=True)
