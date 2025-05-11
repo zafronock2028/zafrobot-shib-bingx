@@ -433,7 +433,7 @@ async def notificar_operacion(operacion, tipo):
                 f"📊 Cantidad: {operacion['cantidad']:.2f}\n"
                 f"💰 Precio: {operacion['precio_entrada']:.8f}\n"
                 f"🎯 TP: {operacion['take_profit']:.8f}\n"
-                f"🛑 SL: {operacion['stop_loss']:.8f}\n"
+                f"🛑 SL: {operacion['stop_loss']:.8f}"
             )
         else:
             ganancia_pct = ((operacion["precio_salida"] - operacion["precio_entrada"]) / operacion["precio_entrada"]) * 100
@@ -590,7 +590,7 @@ async def register_handlers(dp: Dispatcher):
             logger.error(f"Error mostrando operaciones: {e}")
 
 # =================================================================
-# CICLO PRINCIPAL DE TRADING
+# CICLO PRINCIPAL DE TRADING (CORREGIDO)
 # =================================================================
 
 async def ciclo_trading():
@@ -619,30 +619,12 @@ async def ciclo_trading():
                                 operacion = await ejecutar_operacion(señal)
                                 if operacion:
                                     await asyncio.sleep(1.5)
-                                                        finally:
+                        finally:
                             estado.pares_en_analisis.discard(par)
-
+            
             await asyncio.sleep(CONFIG["intervalo_analisis"])
         except Exception as e:
             logger.error(f"Error en ciclo trading: {e}")
-
-async def actualizar_configuracion_inicial():
-    logger.info("Actualizando configuración inicial...")
-    pares_candidatos = await obtener_pares_candidatos()
-    nueva_config = await generar_nueva_configuracion(pares_candidatos)
-    
-    if not nueva_config:
-        logger.error("❌ No se pudo generar configuración inicial.")
-        return
-
-    async with estado.lock:
-        global PARES_CONFIG
-        PARES_CONFIG.clear()
-        PARES_CONFIG.update(nueva_config)
-        estado.contador_operaciones.clear()
-        estado.cooldowns.clear()
-    
-    logger.info(f"✅ Pares configurados: {list(PARES_CONFIG.keys())}")
 
 # =================================================================
 # EJECUCIÓN PRINCIPAL
@@ -656,7 +638,6 @@ async def ejecutar_bot():
     
     try:
         await register_handlers(dp)
-        await actualizar_configuracion_inicial()
         asyncio.create_task(actualizar_configuracion_diaria())
         
         if not await verificar_conexion_kucoin():
