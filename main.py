@@ -30,15 +30,15 @@ logging.basicConfig(
 logger = logging.getLogger("KuCoinProTrader")
 
 # =================================================================
-# CONFIGURACIÓN OPTIMIZADA DE ESTRATEGIA
+# CONFIGURACIÓN OPTIMIZADA DE ESTRATEGIA (AJUSTES FINALES)
 # =================================================================
 
 PARES_CONFIG = {
     "SHIB-USDT": {
         "inc": 1000,
         "min": 3.80,
-        "vol_min": 1200000,
-        "momentum_min": 0.006,
+        "vol_min": 850000,
+        "momentum_min": 0.0045,
         "cooldown": 15,
         "max_ops_dia": 6,
         "tp": 0.022,
@@ -50,8 +50,8 @@ PARES_CONFIG = {
     "PEPE-USDT": {
         "inc": 100000,
         "min": 4.20,
-        "vol_min": 1500000,
-        "momentum_min": 0.007,
+        "vol_min": 980000,
+        "momentum_min": 0.0052,
         "cooldown": 20,
         "max_ops_dia": 7,
         "tp": 0.028,
@@ -63,8 +63,8 @@ PARES_CONFIG = {
     "FLOKI-USDT": {
         "inc": 1000,
         "min": 3.80,
-        "vol_min": 1400000,
-        "momentum_min": 0.0065,
+        "vol_min": 950000,
+        "momentum_min": 0.0050,
         "cooldown": 25,
         "max_ops_dia": 6,
         "tp": 0.024,
@@ -76,8 +76,8 @@ PARES_CONFIG = {
     "WIF-USDT": {
         "inc": 1,
         "min": 4.50,
-        "vol_min": 2000000,
-        "momentum_min": 0.010,
+        "vol_min": 1400000,
+        "momentum_min": 0.0075,
         "cooldown": 15,
         "max_ops_dia": 5,
         "tp": 0.038,
@@ -89,8 +89,8 @@ PARES_CONFIG = {
     "BONK-USDT": {
         "inc": 10000,
         "min": 4.20,
-        "vol_min": 2500000,
-        "momentum_min": 0.008,
+        "vol_min": 1600000,
+        "momentum_min": 0.0060,
         "cooldown": 20,
         "max_ops_dia": 6,
         "tp": 0.032,
@@ -102,8 +102,8 @@ PARES_CONFIG = {
     "BTC3L-USDT": {
         "inc": 0.01,
         "min": 7.00,
-        "vol_min": 4000000,
-        "momentum_min": 0.012,
+        "vol_min": 2500000,
+        "momentum_min": 0.009,
         "cooldown": 12,
         "max_ops_dia": 4,
         "tp": 0.055,
@@ -115,8 +115,8 @@ PARES_CONFIG = {
     "ETH3L-USDT": {
         "inc": 0.01,
         "min": 6.50,
-        "vol_min": 3500000,
-        "momentum_min": 0.011,
+        "vol_min": 2300000,
+        "momentum_min": 0.0085,
         "cooldown": 12,
         "max_ops_dia": 4,
         "tp": 0.048,
@@ -128,8 +128,8 @@ PARES_CONFIG = {
     "JUP-USDT": {
         "inc": 10,
         "min": 4.75,
-        "vol_min": 1800000,
-        "momentum_min": 0.009,
+        "vol_min": 1200000,
+        "momentum_min": 0.0065,
         "cooldown": 25,
         "max_ops_dia": 5,
         "tp": 0.030,
