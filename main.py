@@ -624,7 +624,26 @@ async def ciclo_trading():
             
             await asyncio.sleep(CONFIG["intervalo_analisis"])
         except Exception as e:
+                    except Exception as e:
             logger.error(f"Error en ciclo trading: {e}")
+
+async def actualizar_configuracion_inicial():
+    logger.info("Actualizando configuración inicial...")
+    pares_candidatos = await obtener_pares_candidatos()
+    nueva_config = await generar_nueva_configuracion(pares_candidatos)
+    
+    if not nueva_config:
+        logger.error("❌ No se pudo generar configuración inicial.")
+        return
+
+    async with estado.lock:
+        global PARES_CONFIG
+        PARES_CONFIG.clear()
+        PARES_CONFIG.update(nueva_config)
+        estado.contador_operaciones.clear()
+        estado.cooldowns.clear()
+    
+    logger.info(f"✅ Pares configurados: {list(PARES_CONFIG.keys())}")
 
 # =================================================================
 # EJECUCIÓN PRINCIPAL
@@ -638,6 +657,7 @@ async def ejecutar_bot():
     
     try:
         await register_handlers(dp)
+        await actualizar_configuracion_inicial()
         asyncio.create_task(actualizar_configuracion_diaria())
         
         if not await verificar_conexion_kucoin():
