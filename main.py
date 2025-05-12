@@ -365,28 +365,12 @@ async def ejecutar_operacion(señal):
         logger.info(f"🚀 Iniciando ejecución para {señal['par']}")
         logger.info(f"📈 Señal recibida: {señal}")
 
-        async with estado.lock:
-            if len(estado.operaciones_activas) >= CONFIG["max_operaciones"]:
-                logger.warning("❌ Bloqueado - Máximo de operaciones simultáneas alcanzado")
-                return None
-            
-            ops_diarias = estado.contador_operaciones.get(señal["par"], 0)
-            if ops_diarias >= PARES_CONFIG[señal["par"]]["max_ops_dia"]:
-                logger.warning(f"❌ Bloqueado - Límite diario ({ops_diarias}/{PARES_CONFIG[señal['par']]['max_ops_dia']})")
-                return None
-
         saldo = await obtener_saldo_disponible()
         logger.info(f"💰 Saldo disponible: {saldo:.2f} USDT")
-        
-        if saldo < CONFIG["saldo_minimo"]:
-            error_msg = f"❌ Saldo insuficiente en cuenta\n{saldo:.2f} < {CONFIG['saldo_minimo']} USDT"
-            logger.warning(error_msg)
-            await notificar_error(error_msg)
-            return None
 
         cantidad = await calcular_posicion(señal["par"], saldo, señal["precio"])
         logger.info(f"🧮 Cálculo posición: {cantidad or 'NO VÁLIDA'}")
-        
+
         if not cantidad:
             logger.warning("❌ Abortando - Cantidad no válida")
             return None
@@ -394,10 +378,34 @@ async def ejecutar_operacion(señal):
         valor_operacion = cantidad * señal["precio"]
         min_operacion = PARES_CONFIG[señal["par"]]["min"]
         logger.info(f"📦 Valor operación: {valor_operacion:.2f} USDT (Mínimo requerido: {min_operacion} USDT)")
-        
+
         if valor_operacion < min_operacion:
             logger.warning(f"❌ Abortando - Valor bajo el mínimo ({valor_operacion:.2f} < {min_operacion})")
             return None
+
+        if valor_operacion < CONFIG["saldo_minimo"]:
+            error_msg = f"❌ Valor bajo el mínimo de saldo ({valor_operacion:.2f} < {CONFIG['saldo_minimo']} USDT)"
+            logger.warning(error_msg)
+            await notificar_error(error_msg)
+            return None
+
+        async with estado.lock:
+            if len(estado.operaciones_activas) >= CONFIG["max_operaciones"]:
+                logger.warning("❌ Bloqueado - Máximo de operaciones simultáneas alcanzado")
+                return None
+
+            ops_diarias = estado.contador_operaciones.get(señal["par"], 0)
+            if ops_diarias >= PARES_CONFIG[señal["par"]]["max_ops_dia"]:
+                logger.warning(f"❌ Bloqueado - Límite diario ({ops_diarias}/{PARES_CONFIG[señal['par']]['max_ops_dia']})")
+                return None
+
+        # Si llega aquí, significa que puede ejecutar la operación
+        logger.info(f"✅ Verificaciones completadas, listo para comprar {señal['par']}")
+        # (la lógica de compra sigue después...)
+
+    except Exception as e:
+        logger.error(f"🚨 Error en ejecutar_operacion: {e}")
+        return None
 
         try:
             trade = Trade(
