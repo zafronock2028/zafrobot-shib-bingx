@@ -3,6 +3,7 @@ import logging
 import asyncio
 import json
 import traceback
+import decimal
 from datetime import datetime, timedelta
 from typing import Dict, List
 from aiogram import Bot, Dispatcher, types
@@ -92,16 +93,6 @@ estado = EstadoTrading()
 # =================================================================
 # MÓDULO DE SELECCIÓN DE PARES
 # =================================================================
-def determinar_incremento(simbolo: str) -> float:
-    simbolo = simbolo.upper()
-    if '3L' in simbolo: return 0.01
-    if 'SHIB' in simbolo: return 1000
-    if 'PEPE' in simbolo: return 100000
-    if 'FLOKI' in simbolo or 'BONK' in simbolo: return 10000
-    if 'WIF' in simbolo: return 1
-    if 'JUP' in simbolo: return 10
-    return 100
-
 async def obtener_pares_candidatos() -> List[Dict]:
     try:
         market = Market()
@@ -131,7 +122,7 @@ async def obtener_pares_candidatos() -> List[Dict]:
                         'volumen': vol_value,
                         'precio': precio,
                         'spread': spread
-                    })
+                    )
                 
                 await asyncio.sleep(0.1)
             except Exception as e:
@@ -160,17 +151,8 @@ async def generar_nueva_configuracion(pares: List[Dict]) -> Dict:
             config = CONFIG["seleccion"]["config_base"].copy()
             config.update({
                 'vol_min': par['volumen'] * 0.75,
-                'inc': determinar_incremento(symbol),
                 'minSize': float(symbol_info['baseMinSize'])
             })
-            
-            if '3L' in symbol:
-                config.update({
-                    'min': 7.00,
-                    'momentum_min': 0.0085,
-                    'tp': 0.045,
-                    'sl': 0.022
-                })
             
             nueva_config[symbol] = config
         return nueva_config
@@ -239,7 +221,8 @@ async def obtener_saldo_disponible():
         user_client = User(
             key=os.getenv("API_KEY"),
             secret=os.getenv("SECRET_KEY"),
-            passphrase=os.getenv("API_PASSPHRASE")
+            passphrase=os.getenv("API_PASSPHRASE"),
+            is_sandbox=False
         )
         cuentas = await asyncio.to_thread(user_client.get_account_list)
         total = 0.0
@@ -253,41 +236,32 @@ async def obtener_saldo_disponible():
 
 async def calcular_posicion(par, saldo_disponible, precio_entrada):
     try:
-        config = PARES_CONFIG[par]
+        trade = Trade(
+            key=os.getenv("API_KEY"),
+            secret=os.getenv("SECRET_KEY"),
+            passphrase=os.getenv("API_PASSPHRASE"),
+            is_sandbox=False
+        )
+        symbol_info = await asyncio.to_thread(trade.get_symbol_detail, par)
+        
+        incremento = float(symbol_info["baseIncrement"])
+        min_size = float(symbol_info["baseMinSize"])
+        min_notional = float(symbol_info["minFunds"])
+        
         saldo_asignado = saldo_disponible * CONFIG["uso_saldo"]
         cantidad = (saldo_asignado / precio_entrada) * 0.995
-        cantidad = (cantidad // config["inc"]) * config["inc"]
-        valor_operacion = cantidad * precio_entrada
+        cantidad_redondeada = round(cantidad / incremento) * incremento
+        cantidad_redondeada = max(cantidad_redondeada, min_size)
+        valor_operacion = cantidad_redondeada * precio_entrada
         
-        mensaje_base = (
-            f"❌ {par} - Operación abortada:\n"
-            f"• Cantidad calculada: {cantidad}\n"
-            f"• Mínimo KuCoin: {config['minSize']}\n"
-            f"• Valor operación: {valor_operacion:.2f} USDT\n"
-            f"• Mínimo config: {config['min']} USDT"
-        )
+        if valor_operacion < min_notional:
+            raise ValueError(f"Valor operación {valor_operacion:.2f} < mínimo requerido {min_notional:.2f}")
 
-        if cantidad < config['minSize']:
-            logger.warning(f"{par} - Cantidad bajo mínimo KuCoin ({cantidad} < {config['minSize']})")
-            await notificar_error(f"{par} - Cantidad menor al mínimo permitido\n{cantidad} < {config['minSize']}")
-            await notificar_error(mensaje_base)
-            return None
-            
-        logger.info(f"{par} - Incremento usado: {config['inc']}")
-        logger.info(f"{par} - Cantidad calculada: {cantidad}")
-        logger.info(f"{par} - Valor operación: {valor_operacion:.2f} USDT (mínimo: {config['min']})")
+        decimales = abs(decimal.Decimal(str(incremento)).as_tuple().exponent * -1)
+        size_str = "{:.{}f}".format(cantidad_redondeada, decimales).rstrip('0').rstrip('.') if decimales > 0 else str(int(cantidad_redondeada))
         
-        if valor_operacion < config["min"]:
-            logger.warning(f"{par} - Operación bajo mínimo ({valor_operacion:.2f} < {config['min']})")
-            await notificar_error(mensaje_base)
-            return None
-
-        if valor_operacion < CONFIG["saldo_minimo"]:
-            logger.warning(f"{par} - Valor bajo mínimo de saldo ({valor_operacion:.2f} < {CONFIG['saldo_minimo']})")
-            await notificar_error(f"❌ {par} - Saldo insuficiente\nValor operación: {valor_operacion:.2f} < {CONFIG['saldo_minimo']} USDT")
-            return None
-            
-        return cantidad
+        return float(size_str)
+        
     except Exception as e:
         error_msg = f"❌ Error cálculo posición {par}: {str(e)}"
         logger.error(error_msg)
@@ -302,7 +276,8 @@ async def detectar_oportunidad(par):
         market = Market(
             key=os.getenv("API_KEY"),
             secret=os.getenv("SECRET_KEY"),
-            passphrase=os.getenv("API_PASSPHRASE")
+            passphrase=os.getenv("API_PASSPHRASE"),
+            is_sandbox=False
         )
 
         stats = await asyncio.to_thread(market.get_24h_stats, par)
@@ -369,24 +344,8 @@ async def ejecutar_operacion(señal):
         logger.info(f"💰 Saldo disponible: {saldo:.2f} USDT")
 
         cantidad = await calcular_posicion(señal["par"], saldo, señal["precio"])
-        logger.info(f"🧮 Cálculo posición: {cantidad or 'NO VÁLIDA'}")
-
         if not cantidad:
             logger.warning("❌ Abortando - Cantidad no válida")
-            return None
-
-        valor_operacion = cantidad * señal["precio"]
-        min_operacion = PARES_CONFIG[señal["par"]]["min"]
-        logger.info(f"📦 Valor operación: {valor_operacion:.2f} USDT (Mínimo requerido: {min_operacion} USDT)")
-
-        if valor_operacion < min_operacion:
-            logger.warning(f"❌ Abortando - Valor bajo el mínimo ({valor_operacion:.2f} < {min_operacion})")
-            return None
-
-        if valor_operacion < CONFIG["saldo_minimo"]:
-            error_msg = f"❌ Valor bajo el mínimo de saldo ({valor_operacion:.2f} < {CONFIG['saldo_minimo']} USDT)"
-            logger.warning(error_msg)
-            await notificar_error(error_msg)
             return None
 
         async with estado.lock:
@@ -403,65 +362,59 @@ async def ejecutar_operacion(señal):
             trade = Trade(
                 key=os.getenv("API_KEY"),
                 secret=os.getenv("SECRET_KEY"),
-                passphrase=os.getenv("API_PASSPHRASE")
+                passphrase=os.getenv("API_PASSPHRASE"),
+                is_sandbox=False
             )
             
-            # Precisión máxima en el cálculo
-            config_par = PARES_CONFIG[señal["par"]]
-            incremento = config_par["inc"]
-            cantidad_redondeada = round(cantidad / incremento) * incremento
+            symbol_info = await asyncio.to_thread(trade.get_symbol_detail, señal["par"])
+            min_notional = float(symbol_info["minFunds"])
+            valor_operacion = cantidad * señal["precio"]
             
-            # Formateo del tamaño según requerimientos de KuCoin
-            decimales = abs(int(f"{incremento:.10f}".split('.')[1].rstrip('0'))) if '.' in f"{incremento}" else 0
-            size_str = format(cantidad_redondeada, f".{decimales}f").rstrip('0').rstrip('.') if decimales > 0 else str(int(cantidad_redondeada))
-            
-            logger.info(f"🛒 Ejecutando orden en KuCoin: {señal['par']}")
-            logger.info(f"• Cantidad redondeada: {cantidad_redondeada}")
-            logger.info(f"• Tamaño enviado: {size_str}")
+            if valor_operacion < min_notional:
+                raise ValueError(f"Valor operación {valor_operacion:.2f} < mínimo requerido {min_notional:.2f}")
 
-            # Ejecución robusta de la orden
-            orden = await asyncio.to_thread(
-                trade.create_market_order,
-                symbol=señal["par"],
-                side="buy",
-                size=size_str
+            orden = await asyncio.wait_for(
+                asyncio.to_thread(
+                    trade.create_market_order,
+                    symbol=señal["par"],
+                    side="buy",
+                    size=str(cantidad),
+                    client_oid=f"BOT_{datetime.now().timestamp()}"
+                ),
+                timeout=10
             )
-            
-            # Validación crítica de la respuesta
-            if not orden or "orderId" not in orden:
-                error_msg = f"❌ Respuesta inválida de KuCoin:\n{json.dumps(orden, indent=2)}"
-                logger.error(error_msg)
-                raise RuntimeError(error_msg)
+
+            if not orden.get('orderId'):
+                logger.error("⛔ Respuesta inválida de KuCoin:")
+                logger.error(json.dumps(orden, indent=2))
+                raise RuntimeError("Orden sin orderId")
             
             logger.info(f"✅ Orden ejecutada - ID: {orden.get('orderId')}")
             logger.info(f"🧾 Detalles completos:\n{json.dumps(orden, indent=2, default=str)}")
 
-            # Manejo seguro del precio
-            precio_entrada = orden.get("price")
-            if not precio_entrada or float(precio_entrada) <= 0:
-                logger.warning("⚠ Usando precio de señal por respuesta inválida")
-                precio_entrada = señal["precio"]
-            else:
-                precio_entrada = float(precio_entrada)
+            precio_entrada = orden.get("price", señal["precio"])
+            precio_entrada = float(precio_entrada) if precio_entrada else señal["precio"]
 
         except Exception as e:
-            # Log detallado de errores
-            error_msg = f"🔥 Error crítico en orden:\n{str(e)}"
-            if hasattr(e, 'response') and e.response:
+            error_msg = "🚨 Error en orden de compra:\n"
+            if hasattr(e, 'response'):
                 try:
-                    error_details = json.loads(e.response.text)
-                    error_msg += f"\nCódigo: {error_details.get('code')}\nMensaje: {error_details.get('msg')}\nInfo: {error_details.get('data')}"
-                except Exception as parse_error:
-                    error_msg += f"\nError parseando respuesta: {str(parse_error)}"
+                    error_data = json.loads(e.response.text)
+                    error_msg += f"Código: {error_data.get('code')}\nMensaje: {error_data.get('msg')}\n"
+                    error_msg += f"Detalles: {error_data.get('data')}"
+                except:
+                    error_msg += f"Respuesta cruda: {e.response.text}"
+            else:
+                error_msg += str(e)
             
             logger.error(error_msg)
-            await notificar_error(f"Fallo en {señal['par']}:\n{error_msg}")
+            await notificar_error(error_msg)
             return None
 
         operacion = {
             "par": señal["par"],
             "id_orden": orden["orderId"],
-            "cantidad": cantidad_redondeada,
+            "cantidad": cantidad,
             "precio_entrada": precio_entrada,
             "take_profit": señal["take_profit"],
             "stop_loss": señal["stop_loss"],
@@ -492,22 +445,26 @@ async def cerrar_operacion(operacion, motivo):
         trade = Trade(
             key=os.getenv("API_KEY"),
             secret=os.getenv("SECRET_KEY"),
-            passphrase=os.getenv("API_PASSPHRASE")
+            passphrase=os.getenv("API_PASSPHRASE"),
+            is_sandbox=False
         )
         
-        # Formateo preciso para la venta
-        config_par = PARES_CONFIG[operacion["par"]]
-        incremento = config_par["inc"]
+        symbol_info = await asyncio.to_thread(trade.get_symbol_detail, operacion["par"])
+        incremento = float(symbol_info["baseIncrement"])
         cantidad_redondeada = round(operacion["cantidad"] / incremento) * incremento
         
-        decimales = abs(int(f"{incremento:.10f}".split('.')[1].rstrip('0'))) if '.' in f"{incremento}" else 0
-        size_str = format(cantidad_redondeada, f".{decimales}f").rstrip('0').rstrip('.') if decimales > 0 else str(int(cantidad_redondeada))
+        decimales = abs(decimal.Decimal(str(incremento)).as_tuple().exponent * -1)
+        size_str = "{:.{}f}".format(cantidad_redondeada, decimales).rstrip('0').rstrip('.') if decimales > 0 else str(int(cantidad_redondeada))
         
-        orden_venta = await asyncio.to_thread(
-            trade.create_market_order,
-            symbol=operacion["par"],
-            side="sell",
-            size=size_str
+        orden_venta = await asyncio.wait_for(
+            asyncio.to_thread(
+                trade.create_market_order,
+                symbol=operacion["par"],
+                side="sell",
+                size=size_str,
+                client_oid=f"BOT_{datetime.now().timestamp()}"
+            ),
+            timeout=10
         )
         
         precio_salida = float(orden_venta.get("price", 0))
@@ -541,7 +498,8 @@ async def gestionar_operaciones_activas():
                 market = Market(
                     key=os.getenv("API_KEY"),
                     secret=os.getenv("SECRET_KEY"),
-                    passphrase=os.getenv("API_PASSPHRASE")
+                    passphrase=os.getenv("API_PASSPHRASE"),
+                    is_sandbox=False
                 )
                 ticker = await asyncio.to_thread(market.get_ticker, op["par"])
                 precio_actual = float(ticker["price"])
