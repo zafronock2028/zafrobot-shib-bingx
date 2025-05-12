@@ -780,12 +780,12 @@ async def ciclo_trading():
             logger.error(f"Error en ciclo trading: {str(e)}")
 
 # =================================================================
-# EJECUCIÓN PRINCIPAL
+# INICIALIZACIÓN DEL BOT
 # =================================================================
-if __name__ == "__main__":
-    try:
-        asyncio.run(ejecutar_bot())
-    except KeyboardInterrupt:
-        logger.info("Bot detenido manualmente")
-    except Exception as e:
-        logger.critical(f"Error crítico: {str(e)}")
+async def ejecutar_bot():
+    global bot
+    bot = Bot(token=os.getenv("TELEGRAM_TOKEN"))
+    dp = Dispatcher()
+    await register_handlers(dp)
+    await cargar_configuracion_inicial()
+    await dp.start_polling(bot)
