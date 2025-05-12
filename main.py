@@ -35,7 +35,7 @@ logging.basicConfig(
 logger = logging.getLogger("KuCoinProTrader")
 
 # =================================================================
-# CONFIGURACIÓN PRINCIPAL ACTUALIZADA
+# CONFIGURACIÓN PRINCIPAL
 # =================================================================
 CONFIG = {
     "uso_saldo": 0.85,
@@ -222,7 +222,7 @@ async def actualizar_configuracion_diaria():
             await asyncio.sleep(3600)
 
 # =================================================================
-# CORE DEL BOT - FUNCIONES DE TRADING ACTUALIZADAS
+# CORE DEL TRADING
 # =================================================================
 async def verificar_conexion_kucoin():
     try:
@@ -405,33 +405,63 @@ async def ejecutar_operacion(señal):
                 secret=os.getenv("SECRET_KEY"),
                 passphrase=os.getenv("API_PASSPHRASE")
             )
-            logger.info(f"🛒 Ejecutando orden en KuCoin: {señal['par']} | Cantidad: {cantidad}")
-            orden = await asyncio.to_thread(trade.create_market_order, señal["par"], "buy", cantidad)
+            
+            # Precisión máxima en el cálculo
+            config_par = PARES_CONFIG[señal["par"]]
+            incremento = config_par["inc"]
+            cantidad_redondeada = round(cantidad / incremento) * incremento
+            
+            # Formateo del tamaño según requerimientos de KuCoin
+            decimales = abs(int(f"{incremento:.10f}".split('.')[1].rstrip('0'))) if '.' in f"{incremento}" else 0
+            size_str = format(cantidad_redondeada, f".{decimales}f").rstrip('0').rstrip('.') if decimales > 0 else str(int(cantidad_redondeada))
+            
+            logger.info(f"🛒 Ejecutando orden en KuCoin: {señal['par']}")
+            logger.info(f"• Cantidad redondeada: {cantidad_redondeada}")
+            logger.info(f"• Tamaño enviado: {size_str}")
+
+            # Ejecución robusta de la orden
+            orden = await asyncio.to_thread(
+                trade.create_market_order,
+                symbol=señal["par"],
+                side="buy",
+                size=size_str
+            )
             
             # Validación crítica de la respuesta
             if not orden or "orderId" not in orden:
-                raise RuntimeError(f"Respuesta inválida de KuCoin:\n{json.dumps(orden, indent=2)}")
+                error_msg = f"❌ Respuesta inválida de KuCoin:\n{json.dumps(orden, indent=2)}"
+                logger.error(error_msg)
+                raise RuntimeError(error_msg)
             
             logger.info(f"✅ Orden ejecutada - ID: {orden.get('orderId')}")
-            logger.info(f"🧾 Detalles orden completa:\n{json.dumps(orden, indent=2, default=str)}")
+            logger.info(f"🧾 Detalles completos:\n{json.dumps(orden, indent=2, default=str)}")
 
-            # Manejo robusto del precio
+            # Manejo seguro del precio
             precio_entrada = orden.get("price")
             if not precio_entrada or float(precio_entrada) <= 0:
-                logger.warning("⚠ Precio inválido en respuesta, usando precio de señal")
+                logger.warning("⚠ Usando precio de señal por respuesta inválida")
                 precio_entrada = señal["precio"]
             else:
                 precio_entrada = float(precio_entrada)
 
         except Exception as e:
-            logger.error(f"🔥 Error crítico al ejecutar orden: {str(e)}")
-            await notificar_error(f"Error en orden de {señal['par']}:\n{str(e)}")
+            # Log detallado de errores
+            error_msg = f"🔥 Error crítico en orden:\n{str(e)}"
+            if hasattr(e, 'response') and e.response:
+                try:
+                    error_details = json.loads(e.response.text)
+                    error_msg += f"\nCódigo: {error_details.get('code')}\nMensaje: {error_details.get('msg')}\nInfo: {error_details.get('data')}"
+                except Exception as parse_error:
+                    error_msg += f"\nError parseando respuesta: {str(parse_error)}"
+            
+            logger.error(error_msg)
+            await notificar_error(f"Fallo en {señal['par']}:\n{error_msg}")
             return None
 
         operacion = {
             "par": señal["par"],
             "id_orden": orden["orderId"],
-            "cantidad": cantidad,
+            "cantidad": cantidad_redondeada,
             "precio_entrada": precio_entrada,
             "take_profit": señal["take_profit"],
             "stop_loss": señal["stop_loss"],
@@ -465,11 +495,24 @@ async def cerrar_operacion(operacion, motivo):
             passphrase=os.getenv("API_PASSPHRASE")
         )
         
-        orden_venta = await asyncio.to_thread(trade.create_market_order, operacion["par"], "sell", operacion["cantidad"])
+        # Formateo preciso para la venta
+        config_par = PARES_CONFIG[operacion["par"]]
+        incremento = config_par["inc"]
+        cantidad_redondeada = round(operacion["cantidad"] / incremento) * incremento
         
-        precio_salida = float(orden_venta["price"])
+        decimales = abs(int(f"{incremento:.10f}".split('.')[1].rstrip('0'))) if '.' in f"{incremento}" else 0
+        size_str = format(cantidad_redondeada, f".{decimales}f").rstrip('0').rstrip('.') if decimales > 0 else str(int(cantidad_redondeada))
+        
+        orden_venta = await asyncio.to_thread(
+            trade.create_market_order,
+            symbol=operacion["par"],
+            side="sell",
+            size=size_str
+        )
+        
+        precio_salida = float(orden_venta.get("price", 0))
         fee_venta = float(orden_venta.get("fee", 0))
-        ganancia_neto = (precio_salida * operacion["cantidad"]) - (operacion["precio_entrada"] * operacion["cantidad"]) - operacion["fee_compra"] - fee_venta
+        ganancia_neto = (precio_salida * cantidad_redondeada) - (operacion["precio_entrada"] * cantidad_redondeada) - operacion["fee_compra"] - fee_venta
         
         operacion.update({
             "precio_salida": precio_salida,
@@ -489,7 +532,7 @@ async def cerrar_operacion(operacion, motivo):
         await guardar_historial()
     except Exception as e:
         logger.error(f"Error cerrando operación {operacion['par']}: {e}")
-        await notificar_error(f"Error al cerrar {operacion['par']}: {str(e)}")
+        await notificar_error(f"Error al cerrar {operacion['par']}:\n{str(e)}")
 
 async def gestionar_operaciones_activas():
     async with estado.lock:
@@ -555,7 +598,7 @@ async def notificar_operacion(operacion, tipo):
         if tipo == "ENTRADA":
             mensaje = (
                 f"🚀 ENTRADA {operacion['par']}\n"
-                f"📊 Cantidad: {operacion['cantidad']:.2f}\n"
+                f"📊 Cantidad: {operacion['cantidad']:.8f}\n"
                 f"💰 Precio: {operacion['precio_entrada']:.8f}\n"
                 f"🎯 TP: {operacion['take_profit']:.8f}\n"
                 f"🛑 SL: {operacion['stop_loss']:.8f}"
