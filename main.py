@@ -122,7 +122,7 @@ async def obtener_pares_candidatos() -> List[Dict]:
                         'volumen': vol_value,
                         'precio': precio,
                         'spread': spread
-                    )
+                    })
                 
                 await asyncio.sleep(0.1)
             except Exception as e:
