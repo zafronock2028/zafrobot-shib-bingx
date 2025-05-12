@@ -406,9 +406,9 @@ async def ejecutar_operacion(señal):
                 passphrase=os.getenv("API_PASSPHRASE")
             )
             logger.info(f"🛒 Ejecutando orden en KuCoin: {señal['par']} | Cantidad: {cantidad}")
-orden = await asyncio.to_thread(trade.create_market_order, señal["par"], "buy", cantidad)
-logger.info(f"✅ Orden ejecutada - ID: {orden.get('orderId', 'Sin ID')}")
-logger.debug(f"📦 Respuesta completa de KuCoin: {orden}")
+            orden = await asyncio.to_thread(trade.create_market_order, señal["par"], "buy", cantidad)
+            logger.info(f"✅ Orden ejecutada - ID: {orden.get('orderId', 'Sin ID')}")
+            logger.debug(f"📦 Respuesta completa de KuCoin: {orden}")
 
             precio_entrada = orden.get("price")
             if not precio_entrada:
