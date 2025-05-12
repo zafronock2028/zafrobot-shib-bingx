@@ -120,6 +120,8 @@ async def cargar_configuracion_inicial():
         
     except Exception as e:
         logger.error(f"🔥 Error carga inicial: {str(e)}", exc_info=True)
+    finally:
+        logger.info("✅ Configuración inicial completada")
 
 async def actualizar_configuracion_diaria():
     """Actualización diaria automática de pares"""
@@ -279,7 +281,6 @@ async def calcular_posicion(par, saldo_disponible, precio_entrada):
         if valor_operacion < min_notional:
             raise ValueError(f"Valor insuficiente: {valor_operacion:.6f} < {min_notional:.6f}")
 
-        # Corrección crítica: Paréntesis correcto
         decimales = abs(decimal.Decimal(str(incremento)).as_tuple().exponent)
         size_str = "{:.{}f}".format(cantidad_redondeada, decimales).rstrip('0').rstrip('.')
         
@@ -459,7 +460,6 @@ async def cerrar_operacion(operacion, motivo):
         incremento = float(symbol_info["baseIncrement"])
         cantidad_redondeada = round(operacion["cantidad"] / incremento) * incremento
         
-        # Corrección crítica: Paréntesis correcto
         decimales = abs(decimal.Decimal(str(incremento)).as_tuple().exponent)
         size_str = "{:.{}f}".format(cantidad_redondeada, decimales).rstrip('0').rstrip('.')
         
@@ -787,8 +787,18 @@ async def ejecutar_bot():
     bot = Bot(token=os.getenv("TELEGRAM_TOKEN"))
     dp = Dispatcher()
     await register_handlers(dp)
-    await cargar_configuracion_inicial()
-    await dp.start_polling(bot)
+
+    try:
+        await cargar_configuracion_inicial()  # Esperar la carga completa
+
+        logger.info("✅ Polling de Telegram listo, esperando comandos...")
+        await dp.start_polling(bot)
+
+    except Exception as e:
+        logger.error(f"Error en ejecutar_bot: {str(e)}")
+        await notificar_error(f"Error inicialización: {str(e)}")
+    finally:
+        await bot.close()
 
 # =================================================================
 # EJECUCIÓN PRINCIPAL
