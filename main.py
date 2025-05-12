@@ -17,7 +17,7 @@ load_dotenv()
 # =================================================================
 # DECLARACIÓN GLOBAL DE BOT
 # =================================================================
-bot = None  # Declaración inicial para evitar errores de referencia
+bot = None
 
 # =================================================================
 # VALIDACIÓN DE ENTORNO
@@ -279,9 +279,9 @@ async def calcular_posicion(par, saldo_disponible, precio_entrada):
         if valor_operacion < min_notional:
             raise ValueError(f"Valor insuficiente: {valor_operacion:.6f} < {min_notional:.6f}")
 
-        # Fix: Paréntesis corregido
+        # Corrección crítica: Paréntesis correcto
         decimales = abs(decimal.Decimal(str(incremento)).as_tuple().exponent)
-        size_str = "{:.{}f}".format(cantidad_redondeada, abs(decimales)).rstrip('0').rstrip('.')
+        size_str = "{:.{}f}".format(cantidad_redondeada, decimales).rstrip('0').rstrip('.')
         
         return size_str
 
@@ -459,9 +459,9 @@ async def cerrar_operacion(operacion, motivo):
         incremento = float(symbol_info["baseIncrement"])
         cantidad_redondeada = round(operacion["cantidad"] / incremento) * incremento
         
-        # Fix: Paréntesis corregido
-        decimales = abs(decimal.Decimal(str(incremento)).as_tuple().exponent
-        size_str = "{:.{}f}".format(cantidad_redondeada, abs(decimales)).rstrip('0').rstrip('.')
+        # Corrección crítica: Paréntesis correcto
+        decimales = abs(decimal.Decimal(str(incremento)).as_tuple().exponent)
+        size_str = "{:.{}f}".format(cantidad_redondeada, decimales).rstrip('0').rstrip('.')
         
         orden_venta = await asyncio.wait_for(
             asyncio.to_thread(
@@ -513,7 +513,7 @@ async def gestionar_operaciones_activas():
                 precio_actual = float(ticker["price"])
                 
                 op["max_precio"] = max(op["max_precio"], precio_actual)
-                max_ganancia = (op["max_precio"] - op["precio_entrada"]) / op["precio_entrada"])
+                max_ganancia = (op["max_precio"] - op["precio_entrada"]) / op["precio_entrada"]
                 
                 if PARES_CONFIG[op["par"]]["trailing_stop"] and max_ganancia > CONFIG["proteccion_ganancia"]:
                     nuevo_sl = op["precio_entrada"] * (1 + max_ganancia - PARES_CONFIG[op["par"]]["trailing_offset"])
