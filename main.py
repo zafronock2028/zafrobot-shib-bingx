@@ -236,32 +236,30 @@ async def obtener_saldo_disponible():
 
 async def calcular_posicion(par, saldo_disponible, precio_entrada):
     try:
-        trade = Trade(
-            key=os.getenv("API_KEY"),
-            secret=os.getenv("SECRET_KEY"),
-            passphrase=os.getenv("API_PASSPHRASE"),
-            is_sandbox=False
-        )
-        symbol_info = await asyncio.to_thread(trade.get_symbol_detail, par)
-        
+        market = Market()
+        symbol_list = await asyncio.to_thread(market.get_symbol_list)
+        symbol_info = next((s for s in symbol_list if s['symbol'] == par), None)
+        if not symbol_info:
+            raise ValueError(f"No se encontró información del símbolo {par}")
+
         incremento = float(symbol_info["baseIncrement"])
         min_size = float(symbol_info["baseMinSize"])
         min_notional = float(symbol_info["minFunds"])
-        
+
         saldo_asignado = saldo_disponible * CONFIG["uso_saldo"]
         cantidad = (saldo_asignado / precio_entrada) * 0.995
         cantidad_redondeada = round(cantidad / incremento) * incremento
         cantidad_redondeada = max(cantidad_redondeada, min_size)
         valor_operacion = cantidad_redondeada * precio_entrada
-        
+
         if valor_operacion < min_notional:
             raise ValueError(f"Valor operación {valor_operacion:.2f} < mínimo requerido {min_notional:.2f}")
 
         decimales = abs(decimal.Decimal(str(incremento)).as_tuple().exponent * -1)
         size_str = "{:.{}f}".format(cantidad_redondeada, decimales).rstrip('0').rstrip('.') if decimales > 0 else str(int(cantidad_redondeada))
-        
+
         return float(size_str)
-        
+
     except Exception as e:
         error_msg = f"❌ Error cálculo posición {par}: {str(e)}"
         logger.error(error_msg)
