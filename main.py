@@ -399,30 +399,21 @@ async def ejecutar_operacion(señal):
                 logger.warning(f"❌ Bloqueado - Límite diario ({ops_diarias}/{PARES_CONFIG[señal['par']]['max_ops_dia']})")
                 return None
 
-        # Si llega aquí, significa que puede ejecutar la operación
-        logger.info(f"✅ Verificaciones completadas, listo para comprar {señal['par']}")
-        # (la lógica de compra sigue después...)
-
-    except Exception as e:
-        logger.error(f"🚨 Error en ejecutar_operacion: {e}")
-        return None
-
         try:
             trade = Trade(
                 key=os.getenv("API_KEY"),
                 secret=os.getenv("SECRET_KEY"),
                 passphrase=os.getenv("API_PASSPHRASE")
             )
-            
             logger.info(f"📤 Enviando orden de compra: {señal['par']} - {cantidad}")
             orden = await asyncio.to_thread(trade.create_market_order, señal["par"], "buy", cantidad)
             logger.info(f"✅ Orden ejecutada - ID: {orden['orderId']}")
             logger.debug(f"Respuesta completa de KuCoin: {orden}")
-            
+
             precio_entrada = orden.get("price")
             if not precio_entrada:
                 precio_entrada = señal["precio"]
-                logger.warning(f"⚠ No se obtuvo 'price' desde KuCoin, usando el de la señal")
+                logger.warning("⚠ No se obtuvo 'price' desde KuCoin, usando el de la señal")
             else:
                 precio_entrada = float(precio_entrada)
 
