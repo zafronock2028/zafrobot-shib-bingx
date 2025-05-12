@@ -253,12 +253,13 @@ async def calcular_posicion(par, saldo_disponible, precio_entrada):
         valor_operacion = cantidad_redondeada * precio_entrada
 
         if valor_operacion < min_notional:
-            raise ValueError(f"Valor operación {valor_operacion:.2f} < mínimo requerido {min_notional:.2f}")
+            raise ValueError(f"Valor operación {valor_operacion:.6f} < mínimo requerido {min_notional:.6f}")
 
-        decimales = abs(decimal.Decimal(str(incremento)).as_tuple().exponent * -1)
+        decimales = abs(decimal.Decimal(str(incremento)).as_tuple().exponent)
+        decimales = decimales if decimales > 0 else 0
         size_str = "{:.{}f}".format(cantidad_redondeada, decimales).rstrip('0').rstrip('.') if decimales > 0 else str(int(cantidad_redondeada))
 
-        return float(size_str)
+        return size_str
 
     except Exception as e:
         error_msg = f"❌ Error cálculo posición {par}: {str(e)}"
@@ -341,9 +342,17 @@ async def ejecutar_operacion(señal):
         saldo = await obtener_saldo_disponible()
         logger.info(f"💰 Saldo disponible: {saldo:.2f} USDT")
 
-        cantidad = await calcular_posicion(señal["par"], saldo, señal["precio"])
-        if not cantidad:
+        cantidad_str = await calcular_posicion(señal["par"], saldo, señal["precio"])
+        if not cantidad_str:
             logger.warning("❌ Abortando - Cantidad no válida")
+            return None
+
+        try:
+            cantidad_float = float(cantidad_str)
+        except ValueError as e:
+            error_msg = f"Error convirtiendo cantidad a float: {cantidad_str}"
+            logger.error(error_msg)
+            await notificar_error(error_msg)
             return None
 
         async with estado.lock:
@@ -366,13 +375,14 @@ async def ejecutar_operacion(señal):
             
             symbol_info = await asyncio.to_thread(trade.get_symbol_detail, señal["par"])
             min_notional = float(symbol_info["minFunds"])
-            valor_operacion = cantidad * señal["precio"]
+            valor_operacion = cantidad_float * señal["precio"]
 
             if valor_operacion < min_notional:
                 msg = (
                     f"⛔ Operación descartada en {señal['par']}:\n"
-                    f"• Valor calculado: {valor_operacion:.5f} USDT\n"
-                    f"• Mínimo requerido: {min_notional:.5f} USDT"
+                    f"• Valor calculado: {valor_operacion:.6f} USDT\n"
+                    f"• Mínimo requerido: {min_notional:.6f} USDT\n"
+                    f"• Cantidad: {cantidad_str}"
                 )
                 logger.warning(msg)
                 await notificar_error(msg)
@@ -383,7 +393,7 @@ async def ejecutar_operacion(señal):
                     trade.create_market_order,
                     symbol=señal["par"],
                     side="buy",
-                    size=str(cantidad),
+                    size=cantidad_str,
                     client_oid=f"BOT_{datetime.now().timestamp()}"
                 ),
                 timeout=10
@@ -401,7 +411,12 @@ async def ejecutar_operacion(señal):
             precio_entrada = float(precio_entrada) if precio_entrada else señal["precio"]
 
         except Exception as e:
-            error_msg = "🚨 Error en orden de compra:\n"
+            error_msg = f"🚨 Error en orden de compra para {señal['par']}:\n"
+            error_msg += f"• Cantidad intentada: {cantidad_str}\n"
+            error_msg += f"• Precio estimado: {señal['precio']:.8f}\n"
+            error_msg += f"• Valor operación: {valor_operacion:.8f} USDT\n"
+            error_msg += f"• Mínimo requerido: {min_notional:.8f} USDT\n"
+            
             if hasattr(e, 'response'):
                 try:
                     error_data = json.loads(e.response.text)
@@ -410,7 +425,7 @@ async def ejecutar_operacion(señal):
                 except:
                     error_msg += f"Respuesta cruda: {e.response.text}"
             else:
-                error_msg += str(e)
+                error_msg += f"Excepción: {str(e)}"
             
             logger.error(error_msg)
             await notificar_error(error_msg)
@@ -419,7 +434,7 @@ async def ejecutar_operacion(señal):
         operacion = {
             "par": señal["par"],
             "id_orden": orden["orderId"],
-            "cantidad": cantidad,
+            "cantidad": cantidad_float,
             "precio_entrada": precio_entrada,
             "take_profit": señal["take_profit"],
             "stop_loss": señal["stop_loss"],
@@ -458,7 +473,8 @@ async def cerrar_operacion(operacion, motivo):
         incremento = float(symbol_info["baseIncrement"])
         cantidad_redondeada = round(operacion["cantidad"] / incremento) * incremento
         
-        decimales = abs(decimal.Decimal(str(incremento)).as_tuple().exponent * -1)
+        decimales = abs(decimal.Decimal(str(incremento)).as_tuple().exponent)
+        decimales = decimales if decimales > 0 else 0
         size_str = "{:.{}f}".format(cantidad_redondeada, decimales).rstrip('0').rstrip('.') if decimales > 0 else str(int(cantidad_redondeada))
         
         orden_venta = await asyncio.wait_for(
