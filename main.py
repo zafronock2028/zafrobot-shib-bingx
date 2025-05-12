@@ -512,7 +512,7 @@ async def gestionar_operaciones_activas():
                 ticker = await asyncio.to_thread(market.get_ticker, op["par"])
                 precio_actual = float(ticker["price"])
                 
-                op["max_precio"] = max(op["max_precio"], precio_actual)
+                op["max_precio"] = max(op.get("max_precio", 0), precio_actual)
                 max_ganancia = (op["max_precio"] - op["precio_entrada"]) / op["precio_entrada"]
                 
                 if PARES_CONFIG[op["par"]]["trailing_stop"] and max_ganancia > CONFIG["proteccion_ganancia"]:
@@ -789,3 +789,16 @@ async def ejecutar_bot():
     await register_handlers(dp)
     await cargar_configuracion_inicial()
     await dp.start_polling(bot)
+
+# =================================================================
+# EJECUCIÓN PRINCIPAL
+# =================================================================
+if __name__ == "__main__":
+    try:
+        logger.info("🚀 Iniciando KuCoin Pro Bot...")
+        asyncio.run(ejecutar_bot())
+    except Exception as e:
+        logger.error(f"🔥 Error crítico: {str(e)}")
+        traceback.print_exc()
+    finally:
+        logger.info("🛑 Bot detenido")
