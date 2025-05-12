@@ -367,9 +367,16 @@ async def ejecutar_operacion(señal):
             symbol_info = await asyncio.to_thread(trade.get_symbol_detail, señal["par"])
             min_notional = float(symbol_info["minFunds"])
             valor_operacion = cantidad * señal["precio"]
-            
+
             if valor_operacion < min_notional:
-                raise ValueError(f"Valor operación {valor_operacion:.2f} < mínimo requerido {min_notional:.2f}")
+                msg = (
+                    f"⛔ Operación descartada en {señal['par']}:\n"
+                    f"• Valor calculado: {valor_operacion:.5f} USDT\n"
+                    f"• Mínimo requerido: {min_notional:.5f} USDT"
+                )
+                logger.warning(msg)
+                await notificar_error(msg)
+                return None
 
             orden = await asyncio.wait_for(
                 asyncio.to_thread(
