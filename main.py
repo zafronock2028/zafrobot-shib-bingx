@@ -407,13 +407,19 @@ async def ejecutar_operacion(señal):
             )
             logger.info(f"🛒 Ejecutando orden en KuCoin: {señal['par']} | Cantidad: {cantidad}")
             orden = await asyncio.to_thread(trade.create_market_order, señal["par"], "buy", cantidad)
-            logger.info(f"✅ Orden ejecutada - ID: {orden.get('orderId', 'Sin ID')}")
-            logger.debug(f"📦 Respuesta completa de KuCoin: {orden}")
+            
+            # Validación crítica de la respuesta
+            if not orden or "orderId" not in orden:
+                raise RuntimeError(f"Respuesta inválida de KuCoin:\n{json.dumps(orden, indent=2)}")
+            
+            logger.info(f"✅ Orden ejecutada - ID: {orden.get('orderId')}")
+            logger.info(f"🧾 Detalles orden completa:\n{json.dumps(orden, indent=2, default=str)}")
 
+            # Manejo robusto del precio
             precio_entrada = orden.get("price")
-            if not precio_entrada:
+            if not precio_entrada or float(precio_entrada) <= 0:
+                logger.warning("⚠ Precio inválido en respuesta, usando precio de señal")
                 precio_entrada = señal["precio"]
-                logger.warning("⚠ No se obtuvo 'price' desde KuCoin, usando el de la señal")
             else:
                 precio_entrada = float(precio_entrada)
 
