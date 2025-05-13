@@ -2,6 +2,7 @@ import os
 import logging
 import asyncio
 import json
+import traceback
 from datetime import datetime, timedelta
 from typing import Dict, List
 from aiogram import Bot, Dispatcher, types
@@ -12,15 +13,19 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Validación de variables de entorno
+# =================================================================
+# VALIDACIÓN DE VARIABLES DE ENTORNO
+# =================================================================
 REQUIRED_ENV_VARS = ["TELEGRAM_TOKEN", "CHAT_ID", "API_KEY", "SECRET_KEY", "API_PASSPHRASE"]
 missing_vars = [var for var in REQUIRED_ENV_VARS if not os.getenv(var)]
 if missing_vars:
     raise EnvironmentError(f"Faltan variables de entorno: {', '.join(missing_vars)}")
 
-# Configuración de logging
+# =================================================================
+# CONFIGURACIÓN DE LOGGING
+# =================================================================
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,  # Modo DEBUG para máxima información
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
@@ -32,7 +37,6 @@ logger = logging.getLogger("KuCoinProTrader")
 # =================================================================
 # CONFIGURACIÓN PRINCIPAL
 # =================================================================
-
 CONFIG = {
     "uso_saldo": 0.85,
     "max_operaciones": 2,
@@ -66,7 +70,6 @@ PARES_CONFIG = {}
 # =================================================================
 # SISTEMA DE ESTADO
 # =================================================================
-
 class EstadoTrading:
     def __init__(self):
         self.operaciones_activas = []
@@ -87,9 +90,8 @@ class EstadoTrading:
 estado = EstadoTrading()
 
 # =================================================================
-# MÓDULO DE SELECCIÓN DINÁMICA DE PARES
+# MÓDULO DE SELECCIÓN DE PARES
 # =================================================================
-
 def determinar_incremento(simbolo: str) -> float:
     simbolo = simbolo.upper()
     if '3L' in simbolo: return 0.01
@@ -171,7 +173,6 @@ async def actualizar_configuracion_diaria():
             
             await asyncio.sleep((next_reset - now).total_seconds())
             
-            # Actualizar pares y configuración
             pares_candidatos = await obtener_pares_candidatos()
             nueva_config = await generar_nueva_configuracion(pares_candidatos)
             
@@ -186,7 +187,6 @@ async def actualizar_configuracion_diaria():
                 estado.contador_operaciones.clear()
                 estado.cooldowns.clear()
             
-            # Actualizar volúmenes
             market = Market()
             for par in PARES_CONFIG:
                 try:
@@ -208,7 +208,6 @@ async def actualizar_configuracion_diaria():
 # =================================================================
 # CORE DEL BOT - FUNCIONES DE TRADING
 # =================================================================
-
 async def verificar_conexion_kucoin():
     try:
         market = Market()
@@ -240,8 +239,10 @@ async def calcular_posicion(par, saldo_disponible, precio_entrada):
         cantidad = (cantidad // config["inc"]) * config["inc"]
         valor_operacion = cantidad * precio_entrada
         
+        logger.info(f"Posición {par} → Cantidad: {cantidad}, Valor operación: {valor_operacion:.2f} USDT")
+        
         if valor_operacion < config["min"]:
-            logger.warning(f"{par} - Operación bajo mínimo")
+            logger.warning(f"{par} - Operación bajo mínimo ({valor_operacion:.2f} < {config['min']})")
             return None
             
         return cantidad if valor_operacion >= CONFIG["saldo_minimo"] else None
@@ -259,24 +260,42 @@ async def detectar_oportunidad(par):
             secret=os.getenv("SECRET_KEY"),
             passphrase=os.getenv("API_PASSPHRASE")
         )
-        
+
         stats = await asyncio.to_thread(market.get_24h_stats, par)
-        if float(stats["volValue"]) < PARES_CONFIG[par]["vol_min"]:
+        vol_actual = float(stats["volValue"])
+        if vol_actual < PARES_CONFIG[par]["vol_min"]:
+            logger.info(f"DESCARTADO {par} - Volumen insuficiente ({vol_actual:.2f} < {PARES_CONFIG[par]['vol_min']})")
             return None
 
-        velas = await asyncio.to_thread(market.get_kline, par, "1min", 3)
-        if len(velas) < 3: return None
+        velas = await asyncio.to_thread(market.get_kline, par, "1min")
+        velas = velas[-3:]
+
+        if len(velas) < 3:
+            logger.info(f"DESCARTADO {par} - Menos de 3 velas disponibles")
+            return None
 
         cierres = [float(v[2]) for v in velas]
-        if not (cierres[2] > cierres[1] > cierres[0]): return None
+        logger.info(f"Analizando {par} - Cierres: {cierres}")
+
+        if not (cierres[2] > cierres[1] > cierres[0]):
+            logger.info(f"DESCARTADO {par} - Tendencia no alcista")
+            return None
 
         momentum = (cierres[2] - cierres[0]) / cierres[0]
-        if momentum < PARES_CONFIG[par]["momentum_min"]: return None
+        logger.info(f"Momentum {par}: {momentum:.4f}")
+
+        if momentum < PARES_CONFIG[par]["momentum_min"]:
+            logger.info(f"DESCARTADO {par} - Momentum insuficiente ({momentum:.4f} < {PARES_CONFIG[par]['momentum_min']})")
+            return None
 
         ticker = await asyncio.to_thread(market.get_ticker, par)
         best_ask = float(ticker["bestAsk"])
         best_bid = float(ticker["bestBid"])
-        if (best_ask - best_bid) / best_ask > 0.002: return None
+        spread = (best_ask - best_bid) / best_ask
+        
+        if spread > CONFIG["seleccion"]["spread_maximo"]:
+            logger.info(f"DESCARTADO {par} - Spread alto ({spread:.4f} > {CONFIG['seleccion']['spread_maximo']})")
+            return None
 
         return {
             "par": par,
@@ -291,26 +310,65 @@ async def detectar_oportunidad(par):
 
 async def ejecutar_operacion(señal):
     try:
+        logger.info(f"\n{'='*40}")
+        logger.info(f"🚀 Iniciando ejecución para {señal['par']}")
+        logger.info(f"📈 Señal recibida: {señal}")
+
+        # Verificar límites de operaciones
         async with estado.lock:
             if len(estado.operaciones_activas) >= CONFIG["max_operaciones"]:
+                logger.warning("❌ Bloqueado - Máximo de operaciones simultáneas alcanzado")
                 return None
-            if estado.contador_operaciones.get(señal["par"], 0) >= PARES_CONFIG[señal["par"]]["max_ops_dia"]:
+            
+            ops_diarias = estado.contador_operaciones.get(señal["par"], 0)
+            if ops_diarias >= PARES_CONFIG[señal["par"]]["max_ops_dia"]:
+                logger.warning(f"❌ Bloqueado - Límite diario ({ops_diarias}/{PARES_CONFIG[señal['par']]['max_ops_dia']})")
                 return None
 
+        # Obtener y validar saldo
         saldo = await obtener_saldo_disponible()
-        if saldo < CONFIG["saldo_minimo"]: return None
+        logger.info(f"💰 Saldo disponible: {saldo:.2f} USDT")
+        
+        if saldo < CONFIG["saldo_minimo"]:
+            logger.warning(f"❌ Saldo insuficiente ({saldo:.2f} < {CONFIG['saldo_minimo']})")
+            return None
 
+        # Calcular posición
         cantidad = await calcular_posicion(señal["par"], saldo, señal["precio"])
-        if not cantidad: return None
+        logger.info(f"🧮 Cálculo posición: {cantidad or 'NO VÁLIDA'}")
+        
+        if not cantidad:
+            logger.warning("❌ Abortando - Cantidad no válida")
+            return None
 
-        trade = Trade(
-            key=os.getenv("API_KEY"),
-            secret=os.getenv("SECRET_KEY"),
-            passphrase=os.getenv("API_PASSPHRASE")
-        )
+        # Validar montos mínimos
+        valor_operacion = cantidad * señal["precio"]
+        min_operacion = PARES_CONFIG[señal["par"]]["min"]
+        logger.info(f"📦 Valor operación: {valor_operacion:.2f} USDT (Mínimo requerido: {min_operacion} USDT)")
         
-        orden = await asyncio.to_thread(trade.create_market_order, señal["par"], "buy", cantidad)
-        
+        if valor_operacion < min_operacion:
+            logger.warning(f"❌ Abortando - Valor bajo el mínimo ({valor_operacion:.2f} < {min_operacion})")
+            return None
+
+        # Ejecutar orden
+        try:
+            trade = Trade(
+                key=os.getenv("API_KEY"),
+                secret=os.getenv("SECRET_KEY"),
+                passphrase=os.getenv("API_PASSPHRASE")
+            )
+            
+            logger.info(f"📤 Enviando orden de compra: {señal['par']} - {cantidad}")
+            orden = await asyncio.to_thread(trade.create_market_order, señal["par"], "buy", cantidad)
+            logger.info(f"✅ Orden ejecutada - ID: {orden['orderId']}")
+            logger.debug(f"Respuesta completa de KuCoin: {orden}")
+            
+        except Exception as e:
+            logger.error(f"🔥 Error crítico al ejecutar orden: {str(e)}")
+            await notificar_error(f"Error en orden de {señal['par']}:\n{str(e)}")
+            return None
+
+        # Registrar operación
         operacion = {
             "par": señal["par"],
             "id_orden": orden["orderId"],
@@ -323,16 +381,18 @@ async def ejecutar_operacion(señal):
             "fee_compra": float(orden.get("fee", 0))
         }
 
-        await notificar_operacion(operacion, "ENTRADA")
-        
         async with estado.lock:
             estado.operaciones_activas.append(operacion)
             estado.cooldowns.add(operacion["par"])
-            estado.contador_operaciones[señal["par"]] = estado.contador_operaciones.get(señal["par"], 0) + 1
-            
+            estado.contador_operaciones[señal["par"]] = ops_diarias + 1
+
+        await notificar_operacion(operacion, "ENTRADA")
+        logger.info(f"🏁 Operación registrada exitosamente\n{'='*40}")
         return operacion
+
     except Exception as e:
-        logger.error(f"Error ejecutando operación: {e}")
+        logger.error(f"🚨 Error fatal en ejecutar_operacion: {traceback.format_exc()}")
+        await notificar_error(f"Fallo en ejecución:\n{str(e)}")
         return None
 
 async def cerrar_operacion(operacion, motivo):
@@ -393,7 +453,9 @@ async def gestionar_operaciones_activas():
                 elif precio_actual <= op["stop_loss"]: motivo = "SL"
                 elif (datetime.now() - op["hora_entrada"]).seconds > CONFIG["max_duracion"] * 60: motivo = "TIEMPO"
                 
-                if motivo: await cerrar_operacion(op, motivo)
+                if motivo: 
+                    logger.info(f"Cerrando operación {op['par']} - Motivo: {motivo}")
+                    await cerrar_operacion(op, motivo)
             except Exception as e:
                 logger.error(f"Error gestionando operación {op['par']}: {e}")
 
@@ -404,11 +466,13 @@ async def verificar_cooldown(par):
         estado.ultimo_reseteo = estado.obtener_hora_reseteo()
     
     if estado.contador_operaciones.get(par, 0) >= PARES_CONFIG[par]["max_ops_dia"]:
+        logger.info(f"Cooldown por límite diario en {par}")
         return True
     
     if par in estado.cooldowns:
         ultima_op = next((op for op in estado.historial if op["par"] == par), None)
         if ultima_op and (ahora - ultima_op["hora_entrada"]).seconds < PARES_CONFIG[par]["cooldown"] * 60:
+            logger.info(f"Cooldown activo para {par}")
             return True
     
     return False
@@ -424,7 +488,6 @@ async def guardar_historial():
 # =================================================================
 # INTERFAZ DE TELEGRAM
 # =================================================================
-
 async def notificar_operacion(operacion, tipo):
     try:
         if tipo == "ENTRADA":
@@ -590,14 +653,16 @@ async def register_handlers(dp: Dispatcher):
             logger.error(f"Error mostrando operaciones: {e}")
 
 # =================================================================
-# CICLO PRINCIPAL DE TRADING (CORREGIDO)
+# CICLO PRINCIPAL DE TRADING (CON DIAGNÓSTICO MEJORADO)
 # =================================================================
-
 async def ciclo_trading():
     logger.info("Iniciando ciclo de trading...")
+    logger.info(f"Pares configurados: {list(PARES_CONFIG.keys())}")
+    
     while estado.activo:
         try:
             if not await verificar_conexion_kucoin():
+                logger.warning("Error de conexión con KuCoin")
                 await asyncio.sleep(30)
                 continue
                 
@@ -605,22 +670,35 @@ async def ciclo_trading():
             
             async with estado.lock:
                 if len(estado.operaciones_activas) < CONFIG["max_operaciones"]:
+                    logger.info("=== Iterando pares disponibles ===")
+                    logger.info(f"PARES DISPONIBLES: {list(PARES_CONFIG.keys())}")
+                    
                     for par in PARES_CONFIG:
                         if par in estado.pares_en_analisis:
+                            logger.info(f"SKIP {par} - Ya en análisis")
                             continue
                             
                         estado.pares_en_analisis.add(par)
                         try:
+                            logger.info(f"Iniciando análisis de {par}")
+                            
                             if await verificar_cooldown(par):
+                                logger.info(f"Cooldown activo en {par}")
                                 continue
                                 
                             señal = await detectar_oportunidad(par)
                             if señal:
+                                logger.info(f"Señal detectada en {par}")
                                 operacion = await ejecutar_operacion(señal)
                                 if operacion:
                                     await asyncio.sleep(1.5)
+                            else:
+                                logger.info(f"Sin señal en {par}")
+                        except Exception as e:
+                            logger.error(f"Error analizando {par}: {e}")
                         finally:
                             estado.pares_en_analisis.discard(par)
+                            logger.info(f"✔ Análisis completado: {par}")
             
             await asyncio.sleep(CONFIG["intervalo_analisis"])
         except Exception as e:
@@ -629,31 +707,38 @@ async def ciclo_trading():
 # =================================================================
 # EJECUCIÓN PRINCIPAL
 # =================================================================
-
 async def ejecutar_bot():
     logger.info("=== INICIANDO BOT ===")
     global bot
     bot = Bot(token=os.getenv("TELEGRAM_TOKEN"))
     dp = Dispatcher()
-    
+
     try:
         await register_handlers(dp)
+
+        pares_iniciales = await obtener_pares_candidatos()
+        nueva_config = await generar_nueva_configuracion(pares_iniciales)
+
+        if nueva_config:
+            global PARES_CONFIG
+            PARES_CONFIG.update(nueva_config)
+            logger.info(f"Pares configurados: {list(PARES_CONFIG.keys())}")
+        else:
+            logger.error("No se pudieron cargar pares iniciales.")
+
         asyncio.create_task(actualizar_configuracion_diaria())
-        
+
         if not await verificar_conexion_kucoin():
             logger.error("Error de conexión inicial con KuCoin")
             return
-            
-        try:
-            if os.path.exists('historial_operaciones.json') and os.path.getsize('historial_operaciones.json') > 0:
-                with open('historial_operaciones.json', 'r') as f:
-                    estado.historial = json.load(f)
-                logger.info(f"Historial cargado ({len(estado.historial)} ops)")
-        except Exception as e:
-            logger.error(f"Error cargando historial: {e}")
-            
+
+        if os.path.exists('historial_operaciones.json') and os.path.getsize('historial_operaciones.json') > 0:
+            with open('historial_operaciones.json', 'r') as f:
+                estado.historial = json.load(f)
+            logger.info(f"Historial cargado ({len(estado.historial)} ops)")
+
         await dp.start_polling(bot)
-        
+
     except Exception as e:
         logger.critical(f"Error fatal: {e}")
     finally:
