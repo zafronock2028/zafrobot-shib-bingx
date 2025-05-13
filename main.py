@@ -582,14 +582,15 @@ async def register_handlers(dp: Dispatcher):
             else:
                 precision = 0
 
+            min_cantidad_valida = base_increment
+
             cantidad = (monto_usdt / precio_actual) * 0.995
             cantidad = (cantidad // base_increment) * base_increment
             cantidad = round(cantidad, precision)
 
-            if cantidad <= 0:
-                await message.answer("❌ Error: la cantidad calculada es cero o inválida.")
-                return
-
+            if cantidad < min_cantidad_valida:
+                 await message.answer("❌ Error: la cantidad es demasiado pequeña para este par.")
+                 return
             trade = Trade(
                 key=os.getenv("API_KEY"),
                 secret=os.getenv("SECRET_KEY"),
