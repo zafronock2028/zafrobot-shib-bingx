@@ -25,7 +25,7 @@ if missing_vars:
 # CONFIGURACIÓN DE LOGGING
 # =================================================================
 logging.basicConfig(
-    level=logging.DEBUG,  # Modo DEBUG para máxima información
+    level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
@@ -92,7 +92,16 @@ estado = EstadoTrading()
 # =================================================================
 # MÓDULO DE SELECCIÓN DE PARES
 # =================================================================
-def determinar_incremento(simbolo: str) -> float:
+async def obtener_precision(par: str) -> int:
+    try:
+        market = Market()
+        symbol_info = await asyncio.to_thread(market.get_symbol_list, symbol=par)
+        return int(symbol_info[0]['baseIncrement'].split('.')[1].count('0') + 1)
+    except Exception as e:
+        logger.error(f"Error obteniendo precisión para {par}: {str(e)}")
+        return 8
+
+async def determinar_incremento(simbolo: str) -> float:
     simbolo = simbolo.upper()
     if '3L' in simbolo: return 0.01
     if 'SHIB' in simbolo: return 1000
@@ -149,7 +158,8 @@ async def generar_nueva_configuracion(pares: List[Dict]) -> Dict:
         symbol = par['symbol']
         config = CONFIG["seleccion"]["config_base"].copy()
         config['vol_min'] = par['volumen'] * 0.75
-        config['inc'] = determinar_incremento(symbol)
+        config['inc'] = await determinar_incremento(symbol)
+        config['precision'] = await obtener_precision(symbol)
         
         if '3L' in symbol:
             config.update({
@@ -236,13 +246,16 @@ async def calcular_posicion(par, saldo_disponible, precio_entrada):
         config = PARES_CONFIG[par]
         saldo_asignado = saldo_disponible * CONFIG["uso_saldo"]
         cantidad = (saldo_asignado / precio_entrada) * 0.995
+        
         cantidad = (cantidad // config["inc"]) * config["inc"]
+        cantidad = round(cantidad, config.get("precision", 8))
+        
         valor_operacion = cantidad * precio_entrada
         
-        logger.info(f"Posición {par} → Cantidad: {cantidad}, Valor operación: {valor_operacion:.2f} USDT")
+        logger.info(f"Posición {par} → Cantidad: {cantidad}, Valor: {valor_operacion:.2f} USDT")
         
-        if valor_operacion < config["min"]:
-            logger.warning(f"{par} - Operación bajo mínimo ({valor_operacion:.2f} < {config['min']})")
+        if valor_operacion < 10.0:
+            logger.warning(f"{par} - Operación bajo mínimo KuCoin ({valor_operacion:.2f} < 10.0)")
             return None
             
         return cantidad if valor_operacion >= CONFIG["saldo_minimo"] else None
@@ -299,10 +312,10 @@ async def detectar_oportunidad(par):
 
         return {
             "par": par,
-            "precio": cierres[2],
+            "precio": best_ask,
             "momentum": momentum,
-            "take_profit": cierres[2] * (1 + PARES_CONFIG[par]["tp"]),
-            "stop_loss": cierres[2] * (1 - PARES_CONFIG[par]["sl"])
+            "take_profit": best_ask * (1 + PARES_CONFIG[par]["tp"]),
+            "stop_loss": best_ask * (1 - PARES_CONFIG[par]["sl"])
         }
     except Exception as e:
         logger.error(f"Error analizando {par}: {e}")
@@ -314,7 +327,6 @@ async def ejecutar_operacion(señal):
         logger.info(f"🚀 Iniciando ejecución para {señal['par']}")
         logger.info(f"📈 Señal recibida: {señal}")
 
-        # Verificar límites de operaciones
         async with estado.lock:
             if len(estado.operaciones_activas) >= CONFIG["max_operaciones"]:
                 logger.warning("❌ Bloqueado - Máximo de operaciones simultáneas alcanzado")
@@ -325,7 +337,6 @@ async def ejecutar_operacion(señal):
                 logger.warning(f"❌ Bloqueado - Límite diario ({ops_diarias}/{PARES_CONFIG[señal['par']]['max_ops_dia']})")
                 return None
 
-        # Obtener y validar saldo
         saldo = await obtener_saldo_disponible()
         logger.info(f"💰 Saldo disponible: {saldo:.2f} USDT")
         
@@ -333,7 +344,6 @@ async def ejecutar_operacion(señal):
             logger.warning(f"❌ Saldo insuficiente ({saldo:.2f} < {CONFIG['saldo_minimo']})")
             return None
 
-        # Calcular posición
         cantidad = await calcular_posicion(señal["par"], saldo, señal["precio"])
         logger.info(f"🧮 Cálculo posición: {cantidad or 'NO VÁLIDA'}")
         
@@ -341,54 +351,52 @@ async def ejecutar_operacion(señal):
             logger.warning("❌ Abortando - Cantidad no válida")
             return None
 
-        # Validar montos mínimos
         valor_operacion = cantidad * señal["precio"]
-        min_operacion = PARES_CONFIG[señal["par"]]["min"]
-        logger.info(f"📦 Valor operación: {valor_operacion:.2f} USDT (Mínimo requerido: {min_operacion} USDT)")
-        
-        if valor_operacion < min_operacion:
-            logger.warning(f"❌ Abortando - Valor bajo el mínimo ({valor_operacion:.2f} < {min_operacion})")
-            return None
+        logger.info(f"📦 Valor operación: {valor_operacion:.2f} USDT")
 
-        # Ejecutar orden
         try:
             trade = Trade(
                 key=os.getenv("API_KEY"),
                 secret=os.getenv("SECRET_KEY"),
-                passphrase=os.getenv("API_PASSPHRASE")
+                passphrase=os.getenv("API_PASSPHRASE"),
+                is_sandbox=False
             )
             
             logger.info(f"📤 Enviando orden de compra: {señal['par']} - {cantidad}")
             orden = await asyncio.to_thread(trade.create_market_order, señal["par"], "buy", cantidad)
-            logger.info(f"✅ Orden ejecutada - ID: {orden['orderId']}")
-            logger.debug(f"Respuesta completa de KuCoin: {orden}")
             
+            if "orderId" not in orden:
+                logger.error("🔥 Orden rechazada: %s", orden)
+                await notificar_error(f"Error en orden: {orden.get('msg', 'Sin mensaje')}")
+                return None
+                
+            logger.info(f"✅ Orden ejecutada - ID: {orden['orderId']}")
+            
+            operacion = {
+                "par": señal["par"],
+                "id_orden": orden["orderId"],
+                "cantidad": cantidad,
+                "precio_entrada": float(orden["price"]),
+                "take_profit": señal["take_profit"],
+                "stop_loss": señal["stop_loss"],
+                "max_precio": float(orden["price"]),
+                "hora_entrada": datetime.now(),
+                "fee_compra": float(orden.get("fee", 0))
+            }
+
+            async with estado.lock:
+                estado.operaciones_activas.append(operacion)
+                estado.cooldowns.add(operacion["par"])
+                estado.contador_operaciones[señal["par"]] = ops_diarias + 1
+
+            await notificar_operacion(operacion, "ENTRADA")
+            logger.info(f"🏁 Operación registrada exitosamente\n{'='*40}")
+            return operacion
+
         except Exception as e:
-            logger.error(f"🔥 Error crítico al ejecutar orden: {str(e)}")
+            logger.error(f"🔥 Error crítico al ejecutar orden: {traceback.format_exc()}")
             await notificar_error(f"Error en orden de {señal['par']}:\n{str(e)}")
             return None
-
-        # Registrar operación
-        operacion = {
-            "par": señal["par"],
-            "id_orden": orden["orderId"],
-            "cantidad": cantidad,
-            "precio_entrada": float(orden["price"]),
-            "take_profit": señal["take_profit"],
-            "stop_loss": señal["stop_loss"],
-            "max_precio": float(orden["price"]),
-            "hora_entrada": datetime.now(),
-            "fee_compra": float(orden.get("fee", 0))
-        }
-
-        async with estado.lock:
-            estado.operaciones_activas.append(operacion)
-            estado.cooldowns.add(operacion["par"])
-            estado.contador_operaciones[señal["par"]] = ops_diarias + 1
-
-        await notificar_operacion(operacion, "ENTRADA")
-        logger.info(f"🏁 Operación registrada exitosamente\n{'='*40}")
-        return operacion
 
     except Exception as e:
         logger.error(f"🚨 Error fatal en ejecutar_operacion: {traceback.format_exc()}")
@@ -400,7 +408,8 @@ async def cerrar_operacion(operacion, motivo):
         trade = Trade(
             key=os.getenv("API_KEY"),
             secret=os.getenv("SECRET_KEY"),
-            passphrase=os.getenv("API_PASSPHRASE")
+            passphrase=os.getenv("API_PASSPHRASE"),
+            is_sandbox=False
         )
         
         orden_venta = await asyncio.to_thread(trade.create_market_order, operacion["par"], "sell", operacion["cantidad"])
@@ -653,7 +662,7 @@ async def register_handlers(dp: Dispatcher):
             logger.error(f"Error mostrando operaciones: {e}")
 
 # =================================================================
-# CICLO PRINCIPAL DE TRADING (CON DIAGNÓSTICO MEJORADO)
+# CICLO PRINCIPAL DE TRADING
 # =================================================================
 async def ciclo_trading():
     logger.info("Iniciando ciclo de trading...")
