@@ -773,12 +773,18 @@ async def ciclo_trading():
                                     await asyncio.sleep(2)
                             else:
                                 logger.debug(f"Sin señal en {par}")
+                                
                         except Exception as e:
                             logger.error(f"Error analizando {par}: {str(e)}")
+                            
                         finally:
                             estado.pares_en_analisis.discard(par)
+                            
+                        # Delay crítico para prevenir errores 429
+                        await asyncio.sleep(1)
             
             await asyncio.sleep(CONFIG["intervalo_analisis"])
+            
         except Exception as e:
             logger.error(f"Error en ciclo trading: {str(e)}")
 
