@@ -363,26 +363,30 @@ async def ejecutar_operacion(señal):
             )
 
             logger.info(f"📤 Enviando orden de compra: {señal['par']} - {cantidad}")
-
             orden = await asyncio.to_thread(trade.create_market_order, señal["par"], "buy", cantidad)
-            
+
             if not orden or not isinstance(orden, dict) or "orderId" not in orden:
                 logger.error("🔥 Orden rechazada o inválida: %s", orden)
                 await notificar_error(f"Orden fallida o respuesta inválida: {orden}")
                 return None
 
-            logger.info(f"✅ Orden ejecutada - ID: {orden['orderId']}")
-            
+            # Obtener detalles de la orden para conocer el precio real ejecutado
+            orden_detalle = await asyncio.to_thread(trade.get_order_details, orden["orderId"])
+            precio_entrada = float(orden_detalle.get("dealFunds", 0)) / float(orden_detalle.get("dealSize", 1))
+            fee_compra = float(orden_detalle.get("fee", 0))
+
+            logger.info(f"✅ Orden ejecutada - ID: {orden['orderId']} | Precio: {precio_entrada:.8f}")
+
             operacion = {
                 "par": señal["par"],
                 "id_orden": orden["orderId"],
                 "cantidad": cantidad,
-                "precio_entrada": float(orden["price"]),
+                "precio_entrada": precio_entrada,
                 "take_profit": señal["take_profit"],
                 "stop_loss": señal["stop_loss"],
-                "max_precio": float(orden["price"]),
+                "max_precio": precio_entrada,
                 "hora_entrada": datetime.now(),
-                "fee_compra": float(orden.get("fee", 0))
+                "fee_compra": fee_compra
             }
 
             async with estado.lock:
