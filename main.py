@@ -38,7 +38,7 @@ logger = logging.getLogger("KuCoinProTrader")
 # CONFIGURACIÓN PRINCIPAL
 # =================================================================
 CONFIG = {
-    "uso_saldo": 0.85,
+    "uso_saldo": 1.0,
     "max_operaciones": 2,
     "intervalo_analisis": 6,  # antes: 8 → análisis un poco más frecuente
     "saldo_minimo": 10.00,
@@ -53,8 +53,8 @@ CONFIG = {
         "max_pares": 10,                  # antes: 8 → analiza más pares
         "config_base": {
             "min": 3.50,                  # antes: 4.00 → permite operar con pares ligeramente más débiles
-            "momentum_min": 0.0030,       # antes: 0.0045 → más señales posibles
-            "cooldown": 15,               # antes: 20 → más reintentos por par
+            "momentum_min": 0.0025,       # antes: 0.0045 → más señales posibles
+            "cooldown": 5,               # antes: 20 → más reintentos por par
             "max_ops_dia": 6,             # antes: 5 → permite más entradas por par al día
             "tp": 0.022,                  # antes: 0.025 → take profit un poco más rápido
             "sl": 0.011,                  # antes: 0.012 → stop loss más justo
@@ -254,11 +254,11 @@ async def calcular_posicion(par, saldo_disponible, precio_entrada):
         
         logger.info(f"Posición {par} → Cantidad: {cantidad}, Valor: {valor_operacion:.2f} USDT")
         
-        if valor_operacion < 10.0:
-            logger.warning(f"{par} - Operación bajo mínimo KuCoin ({valor_operacion:.2f} < 10.0)")
-            return None
+    if valor_operacion < 10.0:
+        logger.warning(f"{par} - ⚠ Valor bajo mínimo, pero FORZANDO ejecución")
+        return cantidad
             
-        return cantidad if valor_operacion >= CONFIG["saldo_minimo"] else None
+    return cantidad if valor_operacion >= CONFIG["saldo_minimo"] else None
     except Exception as e:
         logger.error(f"Error calculando posición {par}: {e}")
         return None
