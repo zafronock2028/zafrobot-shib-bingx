@@ -547,18 +547,13 @@ async def register_handlers(dp: Dispatcher):
             if not await verificar_conexion_kucoin():
                 await message.answer("⚠ Error de conexión con KuCoin")
                 return
-                
+
             await message.answer(
                 "🤖 KuCoin Pro Bot - Listo",
                 reply_markup=await crear_menu_principal()
             )
         except Exception as e:
             logger.error(f"Error en comando inicio: {e}")
-
-    @dp.message(Command("stop"))
-    async def comando_stop(message: types.Message):
-        estado.activo = False
-        await message.answer("🛑 Bot detenido manualmente")
 
     @dp.callback_query(lambda c: c.data == "iniciar_bot")
     async def iniciar_bot(callback: types.CallbackQuery):
@@ -580,8 +575,51 @@ async def register_handlers(dp: Dispatcher):
                 f"🔹 Saldo mínimo: {CONFIG['saldo_minimo']} USDT",
                 reply_markup=await crear_menu_principal()
             )
+            await callback.answer()
         except Exception as e:
             logger.error(f"Error al iniciar bot: {e}")
+    
+    @dp.message(Command("stop"))
+    async def comando_stop(message: types.Message):
+        estado.activo = False
+        await message.answer("🛑 Bot detenido manualmente")
+
+    @dp.message(Command("testcompra"))
+    async def comando_testcompra(message: types.Message):
+        try:
+            args = message.text.split()
+            if len(args) != 3:
+                await message.answer("❌ Uso correcto: /testcompra BTC-USDT 5")
+                return
+
+            par = args[1].upper()
+            monto_usdt = float(args[2])
+
+            market = Market()
+            precio_actual = float(await asyncio.to_thread(lambda: market.get_ticker(par)["price"]))
+            cantidad = round((monto_usdt / precio_actual) * 0.995, 6)
+
+            trade = Trade(
+                key=os.getenv("API_KEY"),
+                secret=os.getenv("SECRET_KEY"),
+                passphrase=os.getenv("API_PASSPHRASE"),
+                is_sandbox=False
+            )
+
+            orden = await asyncio.to_thread(trade.create_market_order, par, "buy", str(cantidad))
+
+            await message.answer(
+                f"✅ Orden ejecutada en {par}\n"
+                f"• Monto: {monto_usdt} USDT\n"
+                f"• Cantidad: {cantidad}\n"
+                f"• Precio aprox: {precio_actual:.4f}\n"
+                f"• ID orden: {orden.get('orderOid', 'N/A')}"
+            )
+            logger.info(f"Orden de test ejecutada: {orden}")
+
+        except Exception as e:
+            await message.answer(f"❌ Error ejecutando orden: {str(e)}")
+            logger.error(f"Error en /testcompra: {e}")
 
     @dp.callback_query(lambda c: c.data == "detener_bot")
     async def detener_bot(callback: types.CallbackQuery):
