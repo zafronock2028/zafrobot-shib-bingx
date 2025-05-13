@@ -559,55 +559,59 @@ async def register_handlers(dp: Dispatcher):
         await message.answer("🛑 Bot detenido manualmente")
 
     @dp.message(Command("testcompra"))
-    async def comando_testcompra(message: types.Message):
-        try:
-            args = message.text.split()
-            if len(args) != 3:
-                await message.answer("❌ Uso correcto: /testcompra BTC-USDT 5")
-                return
+async def comando_testcompra(message: types.Message):
+    try:
+        args = message.text.split()
+        if len(args) != 3:
+            await message.answer("❌ Uso correcto: /testcompra BTC-USDT 5")
+            return
 
-            par = args[1].upper()
-            monto_usdt = float(args[2])
+        par = args[1].upper()
+        monto_usdt = float(args[2])
 
-            market = Market()
-            ticker = await asyncio.to_thread(market.get_ticker, par)
-            precio_actual = float(ticker["price"])
+        market = Market()
+        ticker = await asyncio.to_thread(market.get_ticker, par)
+        precio_actual = float(ticker["price"])
 
-            symbol_info = await asyncio.to_thread(market.get_symbol_list, symbol=par)
-            base_increment = float(symbol_info[0]["baseIncrement"])
-            precision = str(base_increment)[::-1].find('.')
-            if precision == -1:
-                precision = 0
+        symbol_info = await asyncio.to_thread(market.get_symbol_list, symbol=par)
+        base_increment_str = symbol_info[0]["baseIncrement"]
+        base_increment = float(base_increment_str)
 
-            cantidad = (monto_usdt / precio_actual) * 0.995
-            cantidad = (cantidad // base_increment) * base_increment
-            cantidad = round(cantidad, precision)
+        # Calcular precisión correctamente
+        if '.' in base_increment_str:
+            precision = len(base_increment_str.split('.')[1].rstrip('0'))
+        else:
+            precision = 0
 
-            if cantidad <= 0:
-                await message.answer("❌ Error: la cantidad calculada es cero o inválida.")
-                return
+        cantidad = (monto_usdt / precio_actual) * 0.995
+        cantidad = (cantidad // base_increment) * base_increment
+        cantidad = round(cantidad, precision)
 
-            trade = Trade(
-                key=os.getenv("API_KEY"),
-                secret=os.getenv("SECRET_KEY"),
-                passphrase=os.getenv("API_PASSPHRASE"),
-                is_sandbox=False
-            )
+        if cantidad <= 0:
+            await message.answer("❌ Error: la cantidad calculada es cero o inválida.")
+            return
 
-            orden = await asyncio.to_thread(trade.create_market_order, par, "buy", str(cantidad))
+        trade = Trade(
+            key=os.getenv("API_KEY"),
+            secret=os.getenv("SECRET_KEY"),
+            passphrase=os.getenv("API_PASSPHRASE"),
+            is_sandbox=False
+        )
 
-            await message.answer(
-                f"✅ Orden ejecutada en {par}\n"
-                f"• Monto: {monto_usdt} USDT\n"
-                f"• Cantidad: {cantidad}\n"
-                f"• Precio aprox: {precio_actual:.8f}\n"
-                f"• ID orden: {orden.get('orderOid', 'N/A')}"
-            )
-            logger.info(f"Orden de test ejecutada: {orden}")
+        orden = await asyncio.to_thread(trade.create_market_order, par, "buy", str(cantidad))
 
-        except Exception as e:
-            await message.answer(f"❌ Error ejecutando orden: {str(e)}")
-            logger.error(f"Error en /testcompra: {traceback.format_exc()}")
+        await message.answer(
+            f"✅ Orden ejecutada en {par}\n"
+            f"• Monto: {monto_usdt} USDT\n"
+            f"• Cantidad: {cantidad}\n"
+            f"• Precio aprox: {precio_actual:.8f}\n"
+            f"• ID orden: {orden.get('orderOid', 'N/A')}"
+        )
+        logger.info(f"Orden de test ejecutada: {orden}")
+
+    except Exception as e:
+        await message.answer(f"❌ Error ejecutando orden: {str(e)}")
+        logger.error(f"Error en /testcompra: {traceback.format_exc()}")
 
     @dp.callback_query(lambda c: c.data == "detener_bot")
     async def detener_bot(callback: types.CallbackQuery):
