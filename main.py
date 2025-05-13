@@ -367,32 +367,18 @@ async def ejecutar_operacion(señal):
             )
 
             logger.info(f"📤 Enviando orden de compra: {señal['par']} - {cantidad}")
-            orden = await asyncio.to_thread(trade.create_market_order, señal["par"], "buy", cantidad)
-            logger.info(f"📤 Orden enviada: {orden}")
-
-            if not orden or not isinstance(orden, dict) or "orderId" not in orden:
-                logger.error("🔥 Orden rechazada o inválida: %s", orden)
-                await notificar_error(f"Orden fallida o respuesta inválida: {orden}")
-                return None
-
-            # Obtener detalles de la orden para conocer el precio real ejecutado
-            orden_detalle = await asyncio.to_thread(trade.get_order_details, orden["orderId"])
-            logger.info(f"📦 Detalles orden: {orden_detalle}")
-            precio_entrada = float(orden_detalle.get("dealFunds", 0)) / float(orden_detalle.get("dealSize", 1))
-            fee_compra = float(orden_detalle.get("fee", 0))
-
-            logger.info(f"✅ Orden ejecutada - ID: {orden['orderId']} | Precio: {precio_entrada:.8f}")
+            orden = trade.create_market_order(symbol=señal["par"], side="buy", size=str(cantidad))
+            logger.info(f"✅ Orden ejecutada: {orden}")
 
             operacion = {
                 "par": señal["par"],
-                "id_orden": orden["orderId"],
                 "cantidad": cantidad,
-                "precio_entrada": precio_entrada,
+                "precio_entrada": señal["precio"],
                 "take_profit": señal["take_profit"],
                 "stop_loss": señal["stop_loss"],
-                "max_precio": precio_entrada,
+                "max_precio": señal["precio"],
                 "hora_entrada": datetime.now(),
-                "fee_compra": fee_compra
+                "fee_compra": 0.0
             }
 
             async with estado.lock:
@@ -405,7 +391,7 @@ async def ejecutar_operacion(señal):
             return operacion
 
         except Exception as e:
-            logger.error(f"🔥 Error crítico al ejecutar orden: {traceback.format_exc()}")
+            logger.error(f"🔥 Error al ejecutar orden de compra: {traceback.format_exc()}")
             await notificar_error(f"Error en orden de {señal['par']}:\n{str(e)}")
             return None
 
