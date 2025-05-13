@@ -41,7 +41,7 @@ CONFIG = {
     "uso_saldo": 1.0,
     "max_operaciones": 2,
     "intervalo_analisis": 6,  # antes: 8 → análisis un poco más frecuente
-    "saldo_minimo": 10.00,
+    "saldo_minimo": 15.00,
     "proteccion_ganancia": 0.012,
     "lock_ganancia": 0.004,
     "max_duracion": 25,
@@ -257,6 +257,10 @@ async def calcular_posicion(par, saldo_disponible, precio_entrada):
         valor_operacion = cantidad * precio_entrada
         logger.info(f"Posición {par} → Cantidad: {cantidad}, Valor: {valor_operacion:.2f} USDT")
 
+        if valor_operacion < CONFIG["saldo_minimo"]:
+            logger.warning(f"{par} - Valor bajo mínimo ({valor_operacion:.2f} USDT). Abortando operación.")
+            return None
+
         return cantidad
             
     except Exception as e:
@@ -364,6 +368,7 @@ async def ejecutar_operacion(señal):
 
             logger.info(f"📤 Enviando orden de compra: {señal['par']} - {cantidad}")
             orden = await asyncio.to_thread(trade.create_market_order, señal["par"], "buy", cantidad)
+            logger.info(f"📤 Orden enviada: {orden}")
 
             if not orden or not isinstance(orden, dict) or "orderId" not in orden:
                 logger.error("🔥 Orden rechazada o inválida: %s", orden)
@@ -372,6 +377,7 @@ async def ejecutar_operacion(señal):
 
             # Obtener detalles de la orden para conocer el precio real ejecutado
             orden_detalle = await asyncio.to_thread(trade.get_order_details, orden["orderId"])
+            logger.info(f"📦 Detalles orden: {orden_detalle}")
             precio_entrada = float(orden_detalle.get("dealFunds", 0)) / float(orden_detalle.get("dealSize", 1))
             fee_compra = float(orden_detalle.get("fee", 0))
 
