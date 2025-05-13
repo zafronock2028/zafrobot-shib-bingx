@@ -216,7 +216,7 @@ async def calcular_posicion(par, saldo_disponible, precio_entrada):
             raise ValueError(f"Valor insuficiente: {valor_operacion:.6f} < {min_notional:.6f}")
 
         # Formateo final seguro
-        decimales = abs(decimal.Decimal(str(incremento)).as_tuple().exponent
+        decimales = abs(decimal.Decimal(str(incremento)).as_tuple().exponent)
         size_str = "{:.{}f}".format(cantidad_redondeada, abs(decimales)).rstrip('0').rstrip('.')
         
         return size_str
@@ -392,7 +392,7 @@ async def cerrar_operacion(operacion, motivo):
         incremento = float(symbol_info["baseIncrement"])
         cantidad_redondeada = round(operacion["cantidad"] / incremento) * incremento
         
-        decimales = abs(decimal.Decimal(str(incremento)).as_tuple().exponent
+        decimales = abs(decimal.Decimal(str(incremento)).as_tuple().exponent)
         size_str = "{:.{}f}".format(cantidad_redondeada, abs(decimales)).rstrip('0').rstrip('.')
         
         orden_venta = await asyncio.wait_for(
