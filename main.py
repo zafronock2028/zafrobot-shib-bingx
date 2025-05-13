@@ -40,27 +40,27 @@ logger = logging.getLogger("KuCoinProTrader")
 CONFIG = {
     "uso_saldo": 0.85,
     "max_operaciones": 2,
-    "intervalo_analisis": 8,
+    "intervalo_analisis": 6,  # antes: 8 → análisis un poco más frecuente
     "saldo_minimo": 10.00,
     "proteccion_ganancia": 0.012,
     "lock_ganancia": 0.004,
     "max_duracion": 25,
     "hora_reseteo": "00:00",
     "seleccion": {
-        "volumen_minimo": 800000,
-        "precio_minimo": 0.00001,
-        "spread_maximo": 0.002,
-        "max_pares": 8,
+        "volumen_minimo": 600000,         # antes: 800000 → más pares disponibles
+        "precio_minimo": 0.000005,        # antes: 0.00001 → permite analizar tokens más baratos
+        "spread_maximo": 0.003,           # antes: 0.002 → acepta ligeramente más spread
+        "max_pares": 10,                  # antes: 8 → analiza más pares
         "config_base": {
-            "min": 4.00,
-            "momentum_min": 0.0045,
-            "cooldown": 20,
-            "max_ops_dia": 5,
-            "tp": 0.025,
-            "sl": 0.012,
+            "min": 3.50,                  # antes: 4.00 → permite operar con pares ligeramente más débiles
+            "momentum_min": 0.0030,       # antes: 0.0045 → más señales posibles
+            "cooldown": 15,               # antes: 20 → más reintentos por par
+            "max_ops_dia": 6,             # antes: 5 → permite más entradas por par al día
+            "tp": 0.022,                  # antes: 0.025 → take profit un poco más rápido
+            "sl": 0.011,                  # antes: 0.012 → stop loss más justo
             "trailing_stop": True,
-            "trailing_offset": 0.003,
-            "slippage": 0.0025
+            "trailing_offset": 0.0025,    # antes: 0.003 → trailing más reactivo
+            "slippage": 0.003             # antes: 0.0025 → más tolerancia de ejecución
         }
     }
 }
