@@ -543,12 +543,19 @@ async def crear_menu_principal():
 async def register_handlers(dp: Dispatcher):
     @dp.message(Command("start"))
     async def comando_inicio(message: types.Message):
-        ...
-
+        try:
+            estado.activo = True
+            await message.answer(
+                "🤖 Zafrobot Scalper V1 listo\nSelecciona una opción:",
+                reply_markup=await crear_menu_principal()
+            )
+        except Exception as e:
+            logger.error(f"Error en /start: {e}")
+            await message.answer("❌ No se pudo cargar el menú")
+        
     @dp.message(Command("stop"))
     async def comando_stop(message: types.Message):
-        ...
-
+        
     @dp.message(Command("testcompra"))
     async def comando_testcompra(message: types.Message):
         try:
