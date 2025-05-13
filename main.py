@@ -361,15 +361,16 @@ async def ejecutar_operacion(señal):
                 passphrase=os.getenv("API_PASSPHRASE"),
                 is_sandbox=False
             )
-            
+
             logger.info(f"📤 Enviando orden de compra: {señal['par']} - {cantidad}")
+
             orden = await asyncio.to_thread(trade.create_market_order, señal["par"], "buy", cantidad)
             
-            if "orderId" not in orden:
-                logger.error("🔥 Orden rechazada: %s", orden)
-                await notificar_error(f"Error en orden: {orden.get('msg', 'Sin mensaje')}")
+            if not orden or not isinstance(orden, dict) or "orderId" not in orden:
+                logger.error("🔥 Orden rechazada o inválida: %s", orden)
+                await notificar_error(f"Orden fallida o respuesta inválida: {orden}")
                 return None
-                
+
             logger.info(f"✅ Orden ejecutada - ID: {orden['orderId']}")
             
             operacion = {
