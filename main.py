@@ -543,46 +543,11 @@ async def crear_menu_principal():
 async def register_handlers(dp: Dispatcher):
     @dp.message(Command("start"))
     async def comando_inicio(message: types.Message):
-        try:
-            if not await verificar_conexion_kucoin():
-                await message.answer("⚠ Error de conexión con KuCoin")
-                return
+        ...
 
-            await message.answer(
-                "🤖 KuCoin Pro Bot - Listo",
-                reply_markup=await crear_menu_principal()
-            )
-        except Exception as e:
-            logger.error(f"Error en comando inicio: {e}")
-
-    @dp.callback_query(lambda c: c.data == "iniciar_bot")
-    async def iniciar_bot(callback: types.CallbackQuery):
-        try:
-            if estado.activo:
-                await callback.answer("⚠ Bot ya activo")
-                return
-
-            if not await verificar_conexion_kucoin():
-                await callback.answer("⚠ Error de conexión")
-                return
-
-            estado.activo = True
-            asyncio.create_task(ciclo_trading())
-
-            await callback.message.edit_text(
-                "🚀 Bot ACTIVADO\n"
-                f"🔹 Pares activos: {len(PARES_CONFIG)}\n"
-                f"🔹 Saldo mínimo: {CONFIG['saldo_minimo']} USDT",
-                reply_markup=await crear_menu_principal()
-            )
-            await callback.answer()
-        except Exception as e:
-            logger.error(f"Error al iniciar bot: {e}")
-    
     @dp.message(Command("stop"))
     async def comando_stop(message: types.Message):
-        estado.activo = False
-        await message.answer("🛑 Bot detenido manualmente")
+        ...
 
     @dp.message(Command("testcompra"))
     async def comando_testcompra(message: types.Message):
@@ -596,8 +561,22 @@ async def register_handlers(dp: Dispatcher):
             monto_usdt = float(args[2])
 
             market = Market()
-            precio_actual = float(await asyncio.to_thread(lambda: market.get_ticker(par)["price"]))
-            cantidad = round((monto_usdt / precio_actual) * 0.995, 6)
+            ticker = await asyncio.to_thread(market.get_ticker, par)
+            precio_actual = float(ticker["price"])
+
+            cantidad = (monto_usdt / precio_actual) * 0.995
+
+            symbol_info = await asyncio.to_thread(market.get_symbol_list, symbol=par)
+            base_increment = float(symbol_info[0]["baseIncrement"])
+
+            cantidad = (cantidad // base_increment) * base_increment
+            precision = str(base_increment)[::-1].find('.')
+            if precision == -1: precision = 0
+            cantidad = round(cantidad, precision)
+
+            if cantidad <= 0:
+                await message.answer("❌ Error: la cantidad calculada es cero o inválida.")
+                return
 
             trade = Trade(
                 key=os.getenv("API_KEY"),
@@ -612,7 +591,7 @@ async def register_handlers(dp: Dispatcher):
                 f"✅ Orden ejecutada en {par}\n"
                 f"• Monto: {monto_usdt} USDT\n"
                 f"• Cantidad: {cantidad}\n"
-                f"• Precio aprox: {precio_actual:.4f}\n"
+                f"• Precio aprox: {precio_actual:.8f}\n"
                 f"• ID orden: {orden.get('orderOid', 'N/A')}"
             )
             logger.info(f"Orden de test ejecutada: {orden}")
