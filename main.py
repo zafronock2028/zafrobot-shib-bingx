@@ -40,27 +40,27 @@ logger = logging.getLogger("KuCoinProTrader")
 CONFIG = {
     "uso_saldo": 1.0,
     "max_operaciones": 2,
-    "intervalo_analisis": 6,  # antes: 8 → análisis un poco más frecuente
+    "intervalo_analisis": 6,
     "saldo_minimo": 15.00,
     "proteccion_ganancia": 0.012,
     "lock_ganancia": 0.004,
     "max_duracion": 25,
     "hora_reseteo": "00:00",
     "seleccion": {
-        "volumen_minimo": 600000,         # antes: 800000 → más pares disponibles
-        "precio_minimo": 0.000005,        # antes: 0.00001 → permite analizar tokens más baratos
-        "spread_maximo": 0.003,           # antes: 0.002 → acepta ligeramente más spread
-        "max_pares": 10,                  # antes: 8 → analiza más pares
+        "volumen_minimo": 600000,
+        "precio_minimo": 0.000005,
+        "spread_maximo": 0.003,
+        "max_pares": 10,
         "config_base": {
-            "min": 3.50,                  # antes: 4.00 → permite operar con pares ligeramente más débiles
-            "momentum_min": 0.0025,       # antes: 0.0045 → más señales posibles
-            "cooldown": 5,               # antes: 20 → más reintentos por par
-            "max_ops_dia": 6,             # antes: 5 → permite más entradas por par al día
-            "tp": 0.022,                  # antes: 0.025 → take profit un poco más rápido
-            "sl": 0.011,                  # antes: 0.012 → stop loss más justo
+            "min": 3.50,
+            "momentum_min": 0.0025,
+            "cooldown": 5,
+            "max_ops_dia": 6,
+            "tp": 0.022,
+            "sl": 0.011,
             "trailing_stop": True,
-            "trailing_offset": 0.0025,    # antes: 0.003 → trailing más reactivo
-            "slippage": 0.003             # antes: 0.0025 → más tolerancia de ejecución
+            "trailing_offset": 0.0025,
+            "slippage": 0.003
         }
     }
 }
@@ -216,7 +216,7 @@ async def actualizar_configuracion_diaria():
             await asyncio.sleep(3600)
 
 # =================================================================
-# CORE DEL BOT - FUNCIONES DE TRADING
+# CORE DEL BOT - FUNCIONES DE TRADING (CON VALIDACIÓN MEJORADA)
 # =================================================================
 async def verificar_conexion_kucoin():
     try:
@@ -247,8 +247,14 @@ async def calcular_posicion(par, saldo_disponible, precio_entrada):
         saldo_asignado = saldo_disponible * CONFIG["uso_saldo"]
         cantidad = (saldo_asignado / precio_entrada) * 0.995
         
+        # Cálculo y ajuste de la cantidad
         cantidad = (cantidad // config["inc"]) * config["inc"]
         cantidad = round(cantidad, config.get("precision", 8))
+
+        # Validación crítica de cantidad mínima
+        if cantidad < config["inc"]:
+            logger.warning(f"{par} - Cantidad ({cantidad}) menor al mínimo requerido ({config['inc']})")
+            return None
 
         if cantidad <= 0:
             logger.warning(f"{par} - Cantidad calculada es cero. Abortando.")
