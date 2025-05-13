@@ -249,14 +249,14 @@ async def calcular_posicion(par, saldo_disponible, precio_entrada):
         
         cantidad = (cantidad // config["inc"]) * config["inc"]
         cantidad = round(cantidad, config.get("precision", 8))
-        
+
+        if cantidad <= 0:
+            logger.warning(f"{par} - Cantidad calculada es cero. Abortando.")
+            return None
+
         valor_operacion = cantidad * precio_entrada
         logger.info(f"Posición {par} → Cantidad: {cantidad}, Valor: {valor_operacion:.2f} USDT")
 
-        # Permitir ejecución incluso si el valor es bajo
-        if valor_operacion < CONFIG["saldo_minimo"]:
-            logger.warning(f"{par} - Valor bajo mínimo ({valor_operacion:.2f} USDT), FORZANDO ejecución")
-    
         return cantidad
             
     except Exception as e:
