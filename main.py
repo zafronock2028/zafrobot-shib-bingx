@@ -642,6 +642,9 @@ async def register_handlers(dp: Dispatcher):
                 await callback.answer("⚠ Error de conexión")
                 return
 
+            # Cargar configuración solo al iniciar
+            await cargar_configuracion_inicial()
+            
             estado.activo = True
             asyncio.create_task(ciclo_trading())
 
@@ -787,13 +790,11 @@ async def ejecutar_bot():
     bot = Bot(token=os.getenv("TELEGRAM_TOKEN"))
     dp = Dispatcher()
     await register_handlers(dp)
-
+    
     try:
-        await cargar_configuracion_inicial()  # Esperar la carga completa
-
         logger.info("✅ Polling de Telegram listo, esperando comandos...")
         await dp.start_polling(bot)
-
+        
     except Exception as e:
         logger.error(f"Error en ejecutar_bot: {str(e)}")
         await notificar_error(f"Error inicialización: {str(e)}")
