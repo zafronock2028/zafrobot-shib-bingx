@@ -552,10 +552,12 @@ async def register_handlers(dp: Dispatcher):
         except Exception as e:
             logger.error(f"Error en /start: {e}")
             await message.answer("❌ No se pudo cargar el menú")
-        
+
     @dp.message(Command("stop"))
     async def comando_stop(message: types.Message):
-        
+        estado.activo = False
+        await message.answer("🛑 Bot detenido manualmente")
+
     @dp.message(Command("testcompra"))
     async def comando_testcompra(message: types.Message):
         try:
@@ -571,14 +573,14 @@ async def register_handlers(dp: Dispatcher):
             ticker = await asyncio.to_thread(market.get_ticker, par)
             precio_actual = float(ticker["price"])
 
-            cantidad = (monto_usdt / precio_actual) * 0.995
-
             symbol_info = await asyncio.to_thread(market.get_symbol_list, symbol=par)
             base_increment = float(symbol_info[0]["baseIncrement"])
-
-            cantidad = (cantidad // base_increment) * base_increment
             precision = str(base_increment)[::-1].find('.')
-            if precision == -1: precision = 0
+            if precision == -1:
+                precision = 0
+
+            cantidad = (monto_usdt / precio_actual) * 0.995
+            cantidad = (cantidad // base_increment) * base_increment
             cantidad = round(cantidad, precision)
 
             if cantidad <= 0:
@@ -605,7 +607,7 @@ async def register_handlers(dp: Dispatcher):
 
         except Exception as e:
             await message.answer(f"❌ Error ejecutando orden: {str(e)}")
-            logger.error(f"Error en /testcompra: {e}")
+            logger.error(f"Error en /testcompra: {traceback.format_exc()}")
 
     @dp.callback_query(lambda c: c.data == "detener_bot")
     async def detener_bot(callback: types.CallbackQuery):
