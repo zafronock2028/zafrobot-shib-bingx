@@ -90,7 +90,7 @@ class EstadoTrading:
 estado = EstadoTrading()
 
 # =================================================================
-# MÓDULO DE SELECCIÓN DE PARES (ACTUALIZADO)
+# MÓDULO DE SELECCIÓN DE PARES
 # =================================================================
 async def obtener_precision(par: str) -> int:
     try:
@@ -219,7 +219,7 @@ async def actualizar_configuracion_diaria():
             await asyncio.sleep(3600)
 
 # =================================================================
-# CORE DEL BOT - FUNCIONES DE TRADING (CORREGIDAS)
+# CORE DEL BOT - FUNCIONES DE TRADING
 # =================================================================
 async def verificar_conexion_kucoin():
     try:
@@ -515,7 +515,7 @@ async def guardar_historial():
         logger.error(f"Error guardando historial: {e}")
 
 # =================================================================
-# INTERFAZ DE TELEGRAM (ACTUALIZADA)
+# INTERFAZ DE TELEGRAM
 # =================================================================
 async def notificar_operacion(operacion, tipo):
     try:
@@ -597,20 +597,25 @@ async def register_handlers(dp: Dispatcher):
             precio_actual = float(ticker["price"])
 
             symbol_info = await asyncio.to_thread(market.get_symbol_list, symbol=par)
-            base_increment_str = symbol_info[0]["baseIncrement"]
-            base_increment = float(base_increment_str)
+            base_min_size = float(symbol_info[0]["baseMinSize"])
+            base_increment = float(symbol_info[0]["baseIncrement"])
+            quote_min_size = float(symbol_info[0]["quoteMinSize"])
 
             precision = await obtener_precision(par)
-            min_cantidad_valida = base_increment
 
             cantidad = (monto_usdt / precio_actual) * 0.995
             cantidad = (cantidad // base_increment) * base_increment
             cantidad = round(cantidad, precision)
 
-            if cantidad < min_cantidad_valida:
-                 await message.answer(f"❌ {par} requiere mínimo {min_cantidad_valida} unidades")
-                 return
-                 
+            if cantidad < base_min_size:
+                await message.answer(f"❌ {par} requiere mínimo {base_min_size} unidades (baseMinSize)")
+                return
+
+            valor_operacion = cantidad * precio_actual
+            if valor_operacion < quote_min_size:
+                await message.answer(f"❌ Valor de operación muy bajo ({valor_operacion:.2f} USDT < {quote_min_size} USDT)")
+                return
+
             if precision == 0:
                 cantidad = int(cantidad)
 
@@ -642,7 +647,48 @@ async def register_handlers(dp: Dispatcher):
             await message.answer(f"❌ Error general: {str(e)}")
             logger.error(f"Error en /testcompra: {traceback.format_exc()}")
 
-    # Resto de handlers...
+    @dp.callback_query(lambda c: c.data == "ver_balance")
+    async def ver_balance(callback: types.CallbackQuery):
+        try:
+            saldo = await obtener_saldo_disponible()
+            await callback.message.answer(f"💰 Balance disponible: {saldo:.2f} USDT")
+        except Exception as e:
+            await callback.message.answer("❌ Error obteniendo balance")
+
+    @dp.callback_query(lambda c: c.data == "ver_operaciones")
+    async def ver_operaciones(callback: types.CallbackQuery):
+        async with estado.lock:
+            if not estado.operaciones_activas:
+                await callback.message.answer("⚠️ No hay operaciones activas")
+                return
+
+            mensaje = "📊 Operaciones Activas:\n"
+            for op in estado.operaciones_activas:
+                mensaje += (
+                    f"• {op['par']}\n"
+                    f"  Entrada: {op['precio_entrada']:.8f}\n"
+                    f"  Cantidad: {op['cantidad']}\n"
+                    f"  TP: {op['take_profit']:.8f}\n"
+                    f"  SL: {op['stop_loss']:.8f}\n\n"
+                )
+            await callback.message.answer(mensaje)
+
+    @dp.callback_query(lambda c: c.data == "ver_historial")
+    async def ver_historial(callback: types.CallbackQuery):
+        async with estado.lock:
+            if not estado.historial:
+                await callback.message.answer("📜 El historial está vacío")
+                return
+
+            mensaje = "📜 Últimas 5 operaciones:\n"
+            for op in estado.historial[-5:]:
+                ganancia_pct = ((op["precio_salida"] - op["precio_entrada"]) / op["precio_entrada"]) * 100
+                mensaje += (
+                    f"• {op['par']} ({op['motivo_salida']})\n"
+                    f"  Ganancia: {ganancia_pct:.2f}%\n"
+                    f"  Duración: {(op['hora_salida'] - op['hora_entrada']).seconds // 60} min\n\n"
+                )
+            await callback.message.answer(mensaje)
 
 # =================================================================
 # CICLO PRINCIPAL DE TRADING
@@ -718,7 +764,9 @@ async def ejecutar_bot():
         else:
             logger.error("No se pudieron cargar pares iniciales.")
 
+        # Iniciar tareas esenciales
         asyncio.create_task(actualizar_configuracion_diaria())
+        asyncio.create_task(ciclo_trading())  # CICLO AUTOMÁTICO ACTIVADO
 
         if not await verificar_conexion_kucoin():
             logger.error("Error de conexión inicial con KuCoin")
@@ -729,6 +777,7 @@ async def ejecutar_bot():
                 estado.historial = json.load(f)
             logger.info(f"Historial cargado ({len(estado.historial)} ops)")
 
+        # Iniciar Telegram
         await dp.start_polling(bot)
 
     except Exception as e:
