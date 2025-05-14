@@ -133,13 +133,28 @@ def analizar(par):
         ultimo = precios[-1]
         promedio = sum(precios) / len(precios)
         spread = abs(ultimo - promedio) / promedio
+
+        ticker = market.get_ticker(symbol=par)
         volumen = float(market.get_24h_stats(par)["volValue"])
+
+        # Cálculo de impulso real
         impulso = (precios[-1] - precios[-2]) / precios[-2]
-        if impulso > 0.001 and spread < 0.02 and volumen > 500000:
-            logging.info(f"[Análisis] {par} | Precio: {ultimo:.6f} | Volumen: {volumen:.0f} | Impulso: {impulso:.4f}")
+
+        # Score simple basado en volumen, impulso y spread
+        score = 0
+        if volumen > 500000: score += 1
+        if impulso > 0.001: score += 1
+        if spread < 0.02: score += 1
+
+        if score >= 2:
+            logging.info(f"[Análisis] {par} | Precio: {ultimo:.6f} | Volumen: {volumen:.0f} | Impulso: {impulso:.4f} | Spread: {spread:.4f} | Score: {score}")
             return {"par": par, "precio": ultimo, "valido": True}
+        else:
+            logging.info(f"[Descartado] {par} | Score: {score} (Impulso: {impulso:.4f}, Spread: {spread:.4f})")
+
     except Exception as e:
         logging.error(f"[Análisis] {par}: {e}")
+    
     return {"par": par, "valido": False}
 
 async def ciclo():
