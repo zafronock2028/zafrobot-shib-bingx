@@ -615,7 +615,62 @@ async def register_handlers(dp: Dispatcher):
             await message.answer(f"❌ Error crítico: {str(e)}")
             logger.error(f"Error en testcompra: {traceback.format_exc()}")
 
-    # ... (resto de handlers de Telegram igual que antes)
+    @dp.callback_query(lambda c: c.data == "iniciar_bot")
+    async def iniciar_bot(callback: types.CallbackQuery):
+        estado.activo = True
+        await callback.message.answer("✅ Bot iniciado")
+        await ciclo_trading()
+
+    @dp.callback_query(lambda c: c.data == "detener_bot")
+    async def detener_bot(callback: types.CallbackQuery):
+        estado.activo = False
+        await callback.message.answer("🛑 Bot detenido")
+
+    @dp.callback_query(lambda c: c.data == "ver_balance")
+    async def handle_ver_balance(callback: types.CallbackQuery):
+        try:
+            saldo = await obtener_saldo_disponible()
+            await callback.message.answer(f"💰 Balance disponible: {saldo:.2f} USDT")
+        except Exception as e:
+            await callback.message.answer("❌ Error obteniendo balance")
+            logger.error(f"Error en balance: {str(e)}")
+
+    @dp.callback_query(lambda c: c.data == "ver_operaciones")
+    async def handle_ver_operaciones(callback: types.CallbackQuery):
+        async with estado.lock:
+            if not estado.operaciones_activas:
+                await callback.message.answer("⚠️ No hay operaciones activas")
+                return
+
+            mensaje = "📊 Operaciones Activas:\n"
+            for op in estado.operaciones_activas:
+                duracion = (datetime.now() - op["hora_entrada"]).seconds // 60
+                mensaje += (
+                    f"• {op['par']}\n"
+                    f"  Entrada: {op['precio_entrada']:.8f}\n"
+                    f"  Cantidad: {op['cantidad']}\n"
+                    f"  Duración: {duracion} min\n"
+                    f"  TP: {op['take_profit']:.8f}\n"
+                    f"  SL: {op['stop_loss']:.8f}\n\n"
+                )
+            await callback.message.answer(mensaje)
+
+    @dp.callback_query(lambda c: c.data == "ver_historial")
+    async def handle_ver_historial(callback: types.CallbackQuery):
+        async with estado.lock:
+            if not estado.historial:
+                await callback.message.answer("📜 El historial está vacío")
+                return
+
+            mensaje = "📜 Últimas 5 operaciones:\n"
+            for op in estado.historial[-5:]:
+                ganancia_pct = ((op["precio_salida"] - op["precio_entrada"]) / op["precio_entrada"]) * 100
+                mensaje += (
+                    f"• {op['par']} ({op['motivo_salida']})\n"
+                    f"  Ganancia: {ganancia_pct:.2f}%\n"
+                    f"  Duración: {(op['hora_salida'] - op['hora_entrada']).seconds // 60} min\n\n"
+                )
+            await callback.message.answer(mensaje)
 
 # =================================================================
 # CICLO PRINCIPAL DE TRADING
