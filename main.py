@@ -603,17 +603,25 @@ async def register_handlers(dp: Dispatcher):
 
             precision = await obtener_precision(par)
 
-            cantidad = (monto_usdt / precio_actual) * 0.995
-            cantidad = (cantidad // base_increment) * base_increment
+            cantidad_bruta = (monto_usdt / precio_actual) * 0.995
+            cantidad = (cantidad_bruta // base_increment) * base_increment
             cantidad = round(cantidad, precision)
 
             if cantidad < base_min_size:
-                await message.answer(f"❌ {par} requiere mínimo {base_min_size} unidades (baseMinSize)")
+                await message.answer(
+                    f"❌ {par} requiere mínimo:\n"
+                    f"- Unidades: {base_min_size}\n"
+                    f"- Valor: {quote_min_size} USDT"
+                )
                 return
 
             valor_operacion = cantidad * precio_actual
             if valor_operacion < quote_min_size:
-                await message.answer(f"❌ Valor de operación muy bajo ({valor_operacion:.2f} USDT < {quote_min_size} USDT)")
+                await message.answer(
+                    f"❌ Valor mínimo requerido:\n"
+                    f"{quote_min_size} USDT\n"
+                    f"(Tu operación: {valor_operacion:.2f} USDT)"
+                )
                 return
 
             if precision == 0:
@@ -629,23 +637,24 @@ async def register_handlers(dp: Dispatcher):
             try:
                 orden = await asyncio.to_thread(trade.create_market_order, par, "buy", str(cantidad))
                 await message.answer(
-                    f"✅ Orden ejecutada en {par}\n"
-                    f"• Monto: {monto_usdt} USDT\n"
+                    f"✅ Orden test ejecutada en {par}\n"
                     f"• Cantidad: {cantidad}\n"
-                    f"• Precio aprox: {precio_actual:.8f}\n"
-                    f"• ID orden: {orden.get('orderOid', 'N/A')}"
+                    f"• Precio: {precio_actual:.8f}\n"
+                    f"• Valor: {valor_operacion:.2f} USDT\n"
+                    f"• ID: {orden.get('orderId', 'N/A')}"
                 )
-                logger.info(f"Orden de test ejecutada: {orden}")
             except Exception as e:
-                if "300000" in str(e):
-                    await message.answer(f"❌ Error KuCoin: La cantidad {cantidad} no cumple los requisitos del par")
+                error_msg = str(e)
+                if "300000" in error_msg:
+                    await message.answer(f"❌ Error KuCoin: Revisa los parámetros del par:\n"
+                                        f"- Mínimo: {base_min_size}\n"
+                                        f"- Incremento: {base_increment}")
                 else:
-                    await message.answer(f"❌ Error ejecutando orden: {str(e)}")
-                logger.error(f"Error en /testcompra: {traceback.format_exc()}")
+                    await message.answer(f"❌ Error de ejecución: {error_msg}")
 
         except Exception as e:
-            await message.answer(f"❌ Error general: {str(e)}")
-            logger.error(f"Error en /testcompra: {traceback.format_exc()}")
+            await message.answer(f"❌ Error crítico: {str(e)}")
+            logger.error(f"Error en testcompra: {traceback.format_exc()}")
 
     @dp.callback_query(lambda c: c.data == "ver_balance")
     async def ver_balance(callback: types.CallbackQuery):
@@ -764,9 +773,8 @@ async def ejecutar_bot():
         else:
             logger.error("No se pudieron cargar pares iniciales.")
 
-        # Iniciar tareas esenciales
         asyncio.create_task(actualizar_configuracion_diaria())
-        asyncio.create_task(ciclo_trading())  # CICLO AUTOMÁTICO ACTIVADO
+        asyncio.create_task(ciclo_trading())
 
         if not await verificar_conexion_kucoin():
             logger.error("Error de conexión inicial con KuCoin")
@@ -777,7 +785,6 @@ async def ejecutar_bot():
                 estado.historial = json.load(f)
             logger.info(f"Historial cargado ({len(estado.historial)} ops)")
 
-        # Iniciar Telegram
         await dp.start_polling(bot)
 
     except Exception as e:
