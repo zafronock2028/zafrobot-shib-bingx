@@ -31,7 +31,7 @@ historial = []
 ultimos_pares = {}
 lock = asyncio.Lock()
 
-# Lista de pares a analizar
+# Lista de pares a analizar (base)
 pares = [
     "SHIB-USDT", "PEPE-USDT", "FLOKI-USDT", "DOGE-USDT", "TRUMP-USDT",
     "SUI-USDT", "TURBO-USDT", "BONK-USDT", "KAS-USDT", "WIF-USDT",
@@ -64,15 +64,43 @@ keyboard = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
+async def actualizar_pares_volumen():
+    try:
+        tickers = await asyncio.to_thread(market.get_all_tickers)
+        usdt_pares = []
+        
+        for t in tickers['ticker']:
+            if t['symbol'].endswith('USDT'):
+                try:
+                    usdt_pares.append({
+                        'symbol': t['symbol'],
+                        'volumen': float(t['volValue'])
+                    })
+                except:
+                    continue
+
+        usdt_pares.sort(key=lambda x: x['volumen'], reverse=True)
+        return [p['symbol'] for p in usdt_pares[:10]]
+    
+    except Exception as e:
+        logging.error(f"Error actualizando pares: {e}")
+        return None
+
 @dp.message(Command("start"))
 async def start(message: types.Message):
     await message.answer("✅ Bot operativo. Usa los botones para controlarlo.", reply_markup=keyboard)
 
 @dp.message()
 async def comandos(message: types.Message):
-    global bot_activo
+    global bot_activo, pares
     if message.text == "🚀 Encender Bot":
         if not bot_activo:
+            # Actualizar lista de pares al iniciar
+            nuevos_pares = await actualizar_pares_volumen()
+            if nuevos_pares:
+                pares = nuevos_pares
+                await message.answer(f"🔄 Top 10 pares actualizados:\n{', '.join(pares)}")
+            
             bot_activo = True
             await message.answer("✅ Bot encendido.")
             asyncio.create_task(ciclo())
@@ -128,29 +156,45 @@ def corregir_cantidad(usdt, precio, par):
 
 def analizar(par):
     try:
-        velas = market.get_kline(symbol=par, kline_type="1min", limit=5)
-        precios = [float(x[2]) for x in velas]
-        ultimo = precios[-1]
-        promedio = sum(precios) / len(precios)
+        # 1. Verificación de velas alcistas consecutivas
+        velas = market.get_kline(symbol=par, kline_type="1min", limit=3)
+        if len(velas) < 3:
+            return {"par": par, "valido": False}
+        
+        cierres = [float(v[2]) for v in velas]
+        c1, c2, c3 = cierres
+        
+        # Validar tendencia alcista
+        if not (c1 < c2 < c3):
+            logging.info(f"[Descartado] {par} | Velas no alcistas: {c1:.6f} < {c2:.6f} < {c3:.6f}")
+            return {"par": par, "valido": False}
+        
+        # Validar momentum
+        momentum = (c3 - c1) / c1
+        if momentum <= 0.001:
+            logging.info(f"[Descartado] {par} | Momentum insuficiente: {momentum:.4%}")
+            return {"par": par, "valido": False}
+
+        # 2. Análisis técnico existente mejorado
+        ultimo = c3
+        promedio = sum(cierres) / 3
         spread = abs(ultimo - promedio) / promedio
-
-        ticker = market.get_ticker(symbol=par)
+        
         volumen = float(market.get_24h_stats(par)["volValue"])
+        impulso = (c3 - c2) / c2  # Impulso inmediato
 
-        # Cálculo de impulso real
-        impulso = (precios[-1] - precios[-2]) / precios[-2]
-
-        # Score simple basado en volumen, impulso y spread
+        # Sistema de scoring
         score = 0
         if volumen > 500000: score += 1
         if impulso > 0.001: score += 1
         if spread < 0.02: score += 1
 
         if score >= 2:
-            logging.info(f"[Análisis] {par} | Precio: {ultimo:.6f} | Volumen: {volumen:.0f} | Impulso: {impulso:.4f} | Spread: {spread:.4f} | Score: {score}")
+            logging.info(f"[Análisis] {par} | Precio: {ultimo:.6f} | Vol: {volumen:.0f} | "
+                        f"Imp: {impulso:.4f} | Spr: {spread:.4f} | Score: {score}/3")
             return {"par": par, "precio": ultimo, "valido": True}
         else:
-            logging.info(f"[Descartado] {par} | Score: {score} (Impulso: {impulso:.4f}, Spread: {spread:.4f})")
+            logging.info(f"[Descartado] {par} | Score: {score}/3 (V:{volumen:.0f}, I:{impulso:.4f}, S:{spread:.4f})")
 
     except Exception as e:
         logging.error(f"[Análisis] {par}: {e}")
@@ -211,7 +255,7 @@ async def monitorear(op):
             max_precio = max(max_precio, actual)
             variacion = (actual - entrada) / entrada
             ganancia_bruta = (actual - entrada) * cantidad
-            comision_aprox = entrada * cantidad * 0.002  # entrada + salida
+            comision_aprox = entrada * cantidad * 0.002
             ganancia_neta = ganancia_bruta - comision_aprox
             op.update({"actual": actual, "ganancia": ganancia_neta})
 
