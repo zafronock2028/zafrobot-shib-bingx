@@ -1,7 +1,7 @@
 import os
 import logging
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime
 from decimal import Decimal, ROUND_DOWN
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
@@ -29,10 +29,12 @@ user = User(API_KEY, SECRET_KEY, API_PASS)
 bot_activo = False
 operaciones = []
 historial = []
+pares_activos = []
+ultimo_update = datetime.now()
 ultimos_pares = {}
 lock = asyncio.Lock()
-step_size_cache = {}
 symbol_info_cache = {}
+pares_descartados = {}
 
 # Configuración
 USO_SALDO = 0.80
@@ -42,6 +44,7 @@ GANANCIA_OBJ = 0.004
 TRAILING_STOP = -0.007
 MIN_ORDEN = 2.5
 SCORE_MINIMO = 2
+ACTUALIZACION_PARES = 300  # 5 minutos
 
 # Teclado Telegram
 keyboard = ReplyKeyboardMarkup(
@@ -96,14 +99,14 @@ async def start(message: types.Message):
 
 @dp.message()
 async def comandos(message: types.Message):
-    global bot_activo
+    global bot_activo, pares_activos, ultimo_update
     if message.text == "🚀 Encender Bot":
         if not bot_activo:
-            nuevos_pares = await actualizar_pares_volumen()
-            if nuevos_pares:
+            pares_activos = await actualizar_pares_volumen()
+            if pares_activos:
                 symbol_info_cache.clear()
-                step_size_cache.clear()
-                await message.answer(f"🔄 Top 10 pares actualizados:\n{', '.join(nuevos_pares)}")
+                await message.answer(f"🔄 Top 10 pares actualizados:\n{', '.join(pares_activos)}")
+                ultimo_update = datetime.now()
             
             bot_activo = True
             await message.answer("✅ Bot encendido.")
@@ -112,6 +115,7 @@ async def comandos(message: types.Message):
             await message.answer("⚠️ El bot ya está encendido.")
     elif message.text == "⛔ Apagar Bot":
         bot_activo = False
+        symbol_info_cache.clear()
         await message.answer("⛔ Bot apagado.")
     elif message.text == "💰 Saldo":
         saldo = await saldo_disponible()
@@ -154,36 +158,50 @@ async def saldo_disponible():
 
 async def analizar_par(par):
     try:
+        # Verificar si el par está en descartados recientes
+        if par in pares_descartados:
+            tiempo_descartado = (datetime.now() - pares_descartados[par]).seconds
+            if tiempo_descartado < 300:
+                return {"par": par, "valido": False}
+            del pares_descartados[par]
+        
         logging.info(f"[ANÁLISIS INICIO] {par}")
         
-        # Obtener velas
-        velas = await asyncio.to_thread(market.get_kline, symbol=par, kline_type="1min", limit=3)
-        if len(velas) != 3:
+        # Obtener velas con manejo de errores
+        try:
+            velas = await asyncio.to_thread(market.get_kline, symbol=par, kline_type="1min", limit=3)
+            if len(velas) != 3:
+                raise ValueError("Velas insuficientes")
+        except Exception as e:
+            logging.warning(f"[{par}] Error obteniendo velas: {str(e)}")
+            pares_descartados[par] = datetime.now()
             return {"par": par, "valido": False}
 
-        cierres = [float(v[2]) for v in velas]
-        volumenes = [float(v[5]) for v in velas]
+        cierres = [float(v[2]) for v in velas if len(v) > 2]
+        volumenes = [float(v[5]) for v in velas if len(v) > 5]
 
-        # Verificar datos
         if len(cierres) != 3 or len(volumenes) != 3:
+            logging.warning(f"[{par}] Datos de vela incompletos")
+            pares_descartados[par] = datetime.now()
             return {"par": par, "valido": False}
 
         c1, c2, c3 = cierres
         v1, v2, v3 = volumenes
 
-        # Obtener volumen 24h
-        stats = await asyncio.to_thread(market.get_24h_stats, par)
-        v24h = float(stats["volValue"]) if stats else 0
+        # Obtener volumen 24h con manejo de errores
+        try:
+            stats = await asyncio.to_thread(market.get_24h_stats, par)
+            v24h = float(stats["volValue"]) if stats else 0
+        except:
+            v24h = 0
 
-        logging.info(f"[VOLUMEN] {par} | 24h: {v24h:,.0f} | Últimas: {v1:,.2f} > {v2:,.2f} > {v3:,.2f}")
-
-        # Calcular métricas
+        # Métricas
         momentum = (c3 - c1) / c1
         impulso = (c3 - c2) / c2
         spread = abs(c3 - (sum(cierres) / 3)) / (sum(cierres) / 3)
         volumen_creciente = v3 > v2 > v1
 
-        # Calcular score
+        # Score
         score = 0
         score += 1 if impulso > 0.0005 else 0
         score += 1 if momentum > 0.0005 else 0
@@ -191,21 +209,42 @@ async def analizar_par(par):
         score += 1 if v24h > 100000 else 0
         score += 1 if volumen_creciente else 0
 
-        logging.info(f"[SCORE] {par} | {score}/5 (Impulso: {impulso:.4f}, Momentum: {momentum:.4f})")
+        # Logs detallados
+        logging.info(f"[SCORE] {par} | {score}/5 -> Imp: {impulso:.4f}, Mom: {momentum:.4f}, Spread: {spread:.4f}, Vol24h: {v24h:,.0f}, VCrec: {volumen_creciente}")
 
         if score >= SCORE_MINIMO:
-            logging.info(f"[SEÑAL DETECTADA] {par}")
+            logging.info(f"[SEÑAL DETECTADA] {par} ✅")
             return {"par": par, "precio": c3, "valido": True}
-        return {"par": par, "valido": False}
+        else:
+            logging.info(f"[DESCARTADO] {par} ❌ Score insuficiente")
+            pares_descartados[par] = datetime.now()
+            return {"par": par, "valido": False}
 
     except Exception as e:
         logging.error(f"[ANALISIS] Error en {par}: {e}")
+        pares_descartados[par] = datetime.now()
         return {"par": par, "valido": False}
 
 async def ciclo_principal():
+    global pares_activos, ultimo_update
     while bot_activo:
         async with lock:
             try:
+                # Actualizar pares cada 5 minutos
+                if (datetime.now() - ultimo_update).seconds > ACTUALIZACION_PARES:
+                    nuevos_pares = await actualizar_pares_volumen()
+                    if nuevos_pares:
+                        pares_activos = nuevos_pares
+                        ultimo_update = datetime.now()
+                        logging.info(f"🔄 Pares actualizados: {', '.join(pares_activos)}")
+                    else:
+                        logging.warning("⚠️ No se pudieron actualizar los pares")
+
+                if not pares_activos:
+                    logging.info("🔄 No hay pares disponibles para analizar")
+                    await asyncio.sleep(30)
+                    continue
+
                 if len(operaciones) >= MAX_OPS:
                     await asyncio.sleep(3)
                     continue
@@ -216,13 +255,8 @@ async def ciclo_principal():
                     continue
 
                 monto_por_op = (saldo * USO_SALDO) / MAX_OPS
-                nuevos_pares = await actualizar_pares_volumen()
 
-                if not nuevos_pares:
-                    await asyncio.sleep(60)
-                    continue
-
-                for par in nuevos_pares:
+                for par in pares_activos:
                     if not bot_activo or len(operaciones) >= MAX_OPS:
                         break
 
@@ -280,6 +314,9 @@ async def monitorear_operacion(op):
     max_precio = op['entrada']
     while op in operaciones and bot_activo:
         try:
+            if not bot_activo:
+                break
+
             ticker = await asyncio.to_thread(market.get_ticker, op['par'])
             actual = float(ticker['price'])
             max_precio = max(max_precio, actual)
