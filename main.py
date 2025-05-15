@@ -30,8 +30,9 @@ operaciones = []
 historial = []
 ultimos_pares = {}
 lock = asyncio.Lock()
+pares_advertencia_step = set()
 
-# Lista de pares a analizar (base)
+# Lista de pares base (se actualiza al iniciar)
 pares = [
     "SHIB-USDT", "PEPE-USDT", "FLOKI-USDT", "DOGE-USDT", "TRUMP-USDT",
     "SUI-USDT", "TURBO-USDT", "BONK-USDT", "KAS-USDT", "WIF-USDT",
@@ -95,7 +96,6 @@ async def comandos(message: types.Message):
     global bot_activo, pares
     if message.text == "🚀 Encender Bot":
         if not bot_activo:
-            # Actualizar lista de pares al iniciar
             nuevos_pares = await actualizar_pares_volumen()
             if nuevos_pares:
                 pares = nuevos_pares
@@ -149,6 +149,10 @@ async def saldo_disponible():
         return 0.0
 
 def corregir_cantidad(usdt, precio, par):
+    if par not in step_size and par not in pares_advertencia_step:
+        logging.warning(f"[ADVERTENCIA] {par} usa step_size por defecto (0.0001). Actualizar diccionario step_size.")
+        pares_advertencia_step.add(par)
+    
     step = Decimal(str(step_size.get(par, 0.0001)))
     cantidad = Decimal(str(usdt)) / Decimal(str(precio))
     cantidad_corr = (cantidad // step) * step
@@ -156,42 +160,38 @@ def corregir_cantidad(usdt, precio, par):
 
 def analizar(par):
     try:
-        # 1. Verificación de velas alcistas consecutivas
         velas = market.get_kline(symbol=par, kline_type="1min", limit=3)
-        if len(velas) < 3:
+        cierres = [float(v[2]) for v in velas if len(v) > 2]
+
+        if len(cierres) != 3:
+            logging.warning(f"[Descartado] {par} | Velas inválidas o incompletas")
             return {"par": par, "valido": False}
         
-        cierres = [float(v[2]) for v in velas]
         c1, c2, c3 = cierres
         
-        # Validar tendencia alcista
         if not (c1 < c2 < c3):
             logging.info(f"[Descartado] {par} | Velas no alcistas: {c1:.6f} < {c2:.6f} < {c3:.6f}")
             return {"par": par, "valido": False}
         
-        # Validar momentum
         momentum = (c3 - c1) / c1
         if momentum <= 0.001:
             logging.info(f"[Descartado] {par} | Momentum insuficiente: {momentum:.4%}")
             return {"par": par, "valido": False}
 
-        # 2. Análisis técnico existente mejorado
         ultimo = c3
         promedio = sum(cierres) / 3
         spread = abs(ultimo - promedio) / promedio
         
         volumen = float(market.get_24h_stats(par)["volValue"])
-        impulso = (c3 - c2) / c2  # Impulso inmediato
+        impulso = (c3 - c2) / c2
 
-        # Sistema de scoring
         score = 0
         if volumen > 500000: score += 1
         if impulso > 0.001: score += 1
         if spread < 0.02: score += 1
 
         if score >= 2:
-            logging.info(f"[Análisis] {par} | Precio: {ultimo:.6f} | Vol: {volumen:.0f} | "
-                        f"Imp: {impulso:.4f} | Spr: {spread:.4f} | Score: {score}/3")
+            logging.info(f"[Análisis] {par} | Precio: {ultimo:.6f} | Vol: {volumen:.0f} | Imp: {impulso:.4f} | Spr: {spread:.4f} | Score: {score}/3")
             return {"par": par, "precio": ultimo, "valido": True}
         else:
             logging.info(f"[Descartado] {par} | Score: {score}/3 (V:{volumen:.0f}, I:{impulso:.4f}, S:{spread:.4f})")
