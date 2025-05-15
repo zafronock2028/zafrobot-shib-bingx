@@ -31,13 +31,7 @@ historial = []
 ultimos_pares = {}
 lock = asyncio.Lock()
 pares_advertencia_step = set()
-
-# Lista de pares base (se actualiza al iniciar)
-pares = [
-    "SHIB-USDT", "PEPE-USDT", "FLOKI-USDT", "DOGE-USDT", "TRUMP-USDT",
-    "SUI-USDT", "TURBO-USDT", "BONK-USDT", "KAS-USDT", "WIF-USDT",
-    "XMR-USDT", "HYPE-USDT", "HYPER-USDT", "OM-USDT", "ENA-USDT"
-]
+pares_descartados = set()
 
 # Configuración
 uso_saldo = 0.80
@@ -46,6 +40,7 @@ espera_reentrada = 600
 ganancia_obj = 0.004
 trailing_stop = -0.007
 min_orden = 2.5
+score_minimo = 2  # Umbral ajustable
 
 step_size = {
     "SUI-USDT": 0.1, "TRUMP-USDT": 0.01, "OM-USDT": 0.01, "ENA-USDT": 0.01,
@@ -81,7 +76,7 @@ async def actualizar_pares_volumen():
                     continue
 
         usdt_pares.sort(key=lambda x: x['volumen'], reverse=True)
-        return [p['symbol'] for p in usdt_pares[:10]]
+        return [p['symbol'] for p in usdt_pares[:25]]  # Top 25 pares
     
     except Exception as e:
         logging.error(f"Error actualizando pares: {e}")
@@ -99,7 +94,7 @@ async def comandos(message: types.Message):
             nuevos_pares = await actualizar_pares_volumen()
             if nuevos_pares:
                 pares = nuevos_pares
-                await message.answer(f"🔄 Top 10 pares actualizados:\n{', '.join(pares)}")
+                await message.answer(f"🔄 Top 25 pares actualizados:\n{', '.join(pares)}")
             
             bot_activo = True
             await message.answer("✅ Bot encendido.")
@@ -156,107 +151,121 @@ def corregir_cantidad(usdt, precio, par):
     step = Decimal(str(step_size.get(par, 0.0001)))
     cantidad = Decimal(str(usdt)) / Decimal(str(precio))
     cantidad_corr = (cantidad // step) * step
-    return str(cantidad_corr.quantize(step, rounding=ROUND_DOWN))
+    return str(cantidad_corr.quantize(step, rounding=ROUND_DOWN)
 
 def analizar(par):
     try:
-        logging.info(f"[ANALIZANDO] {par}")
-        
-        velas = market.get_kline(symbol=par, kline_type="1min", limit=3)
-        
-        cierres = [float(v[2]) for v in velas if len(v) > 2]
-        volumenes = [float(v[5]) for v in velas if len(v) > 5]  # Volumen por vela
-        
-        if len(cierres) != 3:
-            logging.warning(f"[Descartado] {par} | Velas inválidas o incompletas")
+        if par in pares_descartados:
             return {"par": par, "valido": False}
         
-        logging.info(f"[CIERRES] {par} | 1m: {cierres[0]:.6f} | 2m: {cierres[1]:.6f} | 3m: {cierres[2]:.6f}")
+        logging.info(f"\n[ANÁLISIS INICIO] {par}")
+        
+        try:
+            velas = market.get_kline(symbol=par, kline_type="1min", limit=3)
+            cierres = [float(v[2]) for v in velas if len(v) > 2]
+            volumenes = [float(v[5]) for v in velas if len(v) > 5]
+        except Exception as e:
+            logging.error(f"[ERROR VELAS] {par}: {str(e)}")
+            pares_descartados.add(par)
+            return {"par": par, "valido": False}
+
+        if len(cierres) != 3:
+            logging.warning(f"[DESCARTADO] {par} | Razón: Velas incompletas")
+            pares_descartados.add(par)
+            return {"par": par, "valido": False}
         
         c1, c2, c3 = cierres
-        v1, v2, v3 = volumenes if len(volumenes) >= 3 else [0, 0, 0]
-
-        # Sistema de scoring de 5 puntos
-        score = 0
+        v24h = float(market.get_24h_stats(par)["volValue"])
         
-        # 1. Impulso inmediato (últimos 2 cierres)
-        impulso = (c3 - c2) / c2
-        if impulso > 0.0005:
-            score += 1
+        # Logs detallados
+        logging.info(f"[CIERRES] {par} | 1m: {c1:.6f} | 2m: {c2:.6f} | 3m: {c3:.6f}")
+        logging.info(f"[VOLUMEN] {par} | 24h: {v24h:,.0f}")
         
-        # 2. Momentum en 3 velas
+        # Cálculos técnicos
         momentum = (c3 - c1) / c1
-        if momentum > 0.0005:
-            score += 1
-        
-        # 3. Spread de precio
+        impulso = (c3 - c2) / c2
         promedio = sum(cierres) / 3
         spread = abs(c3 - promedio) / promedio
-        if spread < 0.03:
-            score += 1
-        
-        # 4. Volumen 24h
-        volumen_24h = float(market.get_24h_stats(par)["volValue"])
-        if volumen_24h > 100000:
-            score += 1
-        
-        # 5. Volumen creciente en velas
-        if v3 > v2 and v2 > v1:
-            score += 1
+        volumen_creciente = len(volumenes) >= 3 and volumenes[2] > volumenes[1] > volumenes[0]
 
-        if score >= 2:
-            logging.info(f"[SEÑAL DETECTADA] {par} | SCORE: {score}/5 | Entrada posible...")
-            logging.info(f"[Análisis] {par} | Precio: {c3:.6f} | Vol24h: {volumen_24h:.0f} | Imp: {impulso:.4f} | Mom: {momentum:.4f} | Spr: {spread:.4f}")
+        # Sistema de scoring (5 factores)
+        score = 0
+        score += 1 if impulso > 0.0005 else 0  # +1 impulso
+        score += 1 if momentum > 0.0005 else 0   # +1 momentum
+        score += 1 if spread < 0.03 else 0       # +1 spread
+        score += 1 if v24h > 100000 else 0       # +1 volumen 24h
+        score += 1 if volumen_creciente else 0   # +1 volumen creciente
+
+        logging.info(f"[SCORE] {par} | {score}/5 (Impulso: {impulso:.4%}, Momentum: {momentum:.4%}, Spread: {spread:.4%})")
+
+        if score >= score_minimo:
+            logging.info(f"[SEÑAL DETECTADA] {par} | SCORE: {score}/5")
             return {"par": par, "precio": c3, "valido": True}
         else:
-            logging.info(f"[Descartado] {par} | Score insuficiente: {score}/5")
+            logging.info(f"[DESCARTADO] {par} | Razón: Score insuficiente")
             return {"par": par, "valido": False}
 
     except Exception as e:
-        logging.error(f"[Análisis] {par}: {e}")
-    
-    return {"par": par, "valido": False}
+        logging.error(f"[ERROR ANÁLISIS] {par}: {str(e)}")
+        pares_descartados.add(par)
+        return {"par": par, "valido": False}
 
 async def ciclo():
     global operaciones
     await asyncio.sleep(5)
+    
     while bot_activo:
         async with lock:
-            if len(operaciones) >= max_ops:
-                await asyncio.sleep(3)
-                continue
-
-            saldo = await saldo_disponible()
-            monto = (saldo * uso_saldo) / max_ops
-
-            for par in pares:
-                if par in [o["par"] for o in operaciones]:
-                    continue
-                if par in ultimos_pares and (datetime.now() - ultimos_pares[par]).total_seconds() < espera_reentrada:
+            try:
+                if len(operaciones) >= max_ops:
+                    await asyncio.sleep(3)
                     continue
 
-                analisis = analizar(par)
-                if not analisis["valido"]:
+                saldo = await saldo_disponible()
+                if saldo < min_orden:
+                    logging.warning(f"[SALDO INSUFICIENTE] {saldo:.2f} USDT")
+                    await asyncio.sleep(10)
                     continue
 
-                cantidad = corregir_cantidad(monto, analisis["precio"], par)
-                try:
-                    trade.create_market_order(symbol=par, side="buy", size=cantidad)
-                    op = {
-                        "par": par,
-                        "entrada": analisis["precio"],
-                        "cantidad": float(cantidad),
-                        "actual": analisis["precio"],
-                        "ganancia": 0.0
-                    }
-                    operaciones.append(op)
-                    logging.info(f"[COMPRA] {par} | Entrada: {analisis['precio']:.6f} | Cantidad: {cantidad}")
-                    await bot.send_message(CHAT_ID, f"✅ *Compra ejecutada*\nPar: `{par}`\nEntrada: `{analisis['precio']:.6f}`")
-                    asyncio.create_task(monitorear(op))
-                    break
-                except Exception as e:
-                    logging.error(f"[Error Compra] {par}: {e}")
-        await asyncio.sleep(2)
+                monto = (saldo * uso_saldo) / max_ops
+
+                for par in pares:
+                    if par in [op["par"] for op in operaciones]:
+                        continue
+                    if par in ultimos_pares and (datetime.now() - ultimos_pares[par]).total_seconds() < espera_reentrada:
+                        continue
+
+                    analisis = analizar(par)
+                    if not analisis["valido"]:
+                        continue
+
+                    try:
+                        cantidad = corregir_cantidad(monto, analisis["precio"], par)
+                        trade.create_market_order(symbol=par, side="buy", size=cantidad)
+                        
+                        op = {
+                            "par": par,
+                            "entrada": analisis["precio"],
+                            "cantidad": float(cantidad),
+                            "actual": analisis["precio"],
+                            "ganancia": 0.0
+                        }
+                        operaciones.append(op)
+                        
+                        logging.info(f"[COMPRA] {par} | Entrada: {analisis['precio']:.6f}")
+                        await bot.send_message(CHAT_ID, f"✅ *Compra ejecutada*\nPar: `{par}`\nEntrada: `{analisis['precio']:.6f}`")
+                        asyncio.create_task(monitorear(op))
+                        break
+                        
+                    except Exception as e:
+                        logging.error(f"[ERROR COMPRA] {par}: {str(e)}")
+                        pares_descartados.add(par)
+                
+                await asyncio.sleep(2)
+                
+            except Exception as e:
+                logging.error(f"[ERROR CICLO] {str(e)}")
+                await asyncio.sleep(10)
 
 async def monitorear(op):
     global operaciones, historial
@@ -295,7 +304,7 @@ async def monitorear(op):
                 )
                 break
         except Exception as e:
-            logging.error(f"[Monitoreo] {par}: {e}")
+            logging.error(f"[ERROR MONITOREO] {par}: {str(e)}")
         await asyncio.sleep(3)
 
 async def main():
