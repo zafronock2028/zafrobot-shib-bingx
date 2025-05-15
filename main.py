@@ -44,7 +44,7 @@ GANANCIA_OBJ = 0.004
 TRAILING_STOP = -0.007
 MIN_ORDEN = 2.5
 SCORE_MINIMO = 2
-ACTUALIZACION_PARES = 300  # 5 minutos
+ACTUALIZACION_PARES = 300
 
 # Teclado Telegram
 keyboard = ReplyKeyboardMarkup(
@@ -158,70 +158,64 @@ async def saldo_disponible():
 
 async def analizar_par(par):
     try:
-        # Verificar si el par está en descartados recientes
+        # Verificar si el par está temporalmente descartado
         if par in pares_descartados:
-            tiempo_descartado = (datetime.now() - pares_descartados[par]).seconds
-            if tiempo_descartado < 300:
+            tiempo_descarte = (datetime.now() - pares_descartados[par]).seconds
+            if tiempo_descarte < 300:
                 return {"par": par, "valido": False}
             del pares_descartados[par]
         
-        logging.info(f"[ANÁLISIS INICIO] {par}")
-        
-        # Obtener velas con manejo de errores
+        # Verificación crítica de velas antes del análisis
         try:
             velas = await asyncio.to_thread(market.get_kline, symbol=par, kline_type="1min", limit=3)
-            if len(velas) != 3:
-                raise ValueError("Velas insuficientes")
+            if len(velas) < 3 or any(len(v) < 6 for v in velas):
+                raise ValueError("Datos de vela incompletos")
         except Exception as e:
-            logging.warning(f"[{par}] Error obteniendo velas: {str(e)}")
+            if par not in pares_descartados:  # Evitar spam de logs
+                logging.warning(f"[{par}] Descarte silencioso: {str(e)}")
             pares_descartados[par] = datetime.now()
             return {"par": par, "valido": False}
 
-        cierres = [float(v[2]) for v in velas if len(v) > 2]
-        volumenes = [float(v[5]) for v in velas if len(v) > 5]
-
-        if len(cierres) != 3 or len(volumenes) != 3:
-            logging.warning(f"[{par}] Datos de vela incompletos")
-            pares_descartados[par] = datetime.now()
-            return {"par": par, "valido": False}
+        cierres = [float(v[2]) for v in velas]
+        volumenes = [float(v[5]) for v in velas]
 
         c1, c2, c3 = cierres
         v1, v2, v3 = volumenes
 
-        # Obtener volumen 24h con manejo de errores
+        # Obtener volumen 24h
         try:
             stats = await asyncio.to_thread(market.get_24h_stats, par)
             v24h = float(stats["volValue"]) if stats else 0
         except:
             v24h = 0
 
-        # Métricas
+        # Cálculo de métricas
         momentum = (c3 - c1) / c1
         impulso = (c3 - c2) / c2
         spread = abs(c3 - (sum(cierres) / 3)) / (sum(cierres) / 3)
         volumen_creciente = v3 > v2 > v1
 
-        # Score
-        score = 0
-        score += 1 if impulso > 0.0005 else 0
-        score += 1 if momentum > 0.0005 else 0
-        score += 1 if spread < 0.03 else 0
-        score += 1 if v24h > 100000 else 0
-        score += 1 if volumen_creciente else 0
+        # Sistema de scoring
+        score = sum([
+            1 if impulso > 0.0005 else 0,
+            1 if momentum > 0.0005 else 0,
+            1 if spread < 0.03 else 0,
+            1 if v24h > 100000 else 0,
+            1 if volumen_creciente else 0
+        ])
 
-        # Logs detallados
-        logging.info(f"[SCORE] {par} | {score}/5 -> Imp: {impulso:.4f}, Mom: {momentum:.4f}, Spread: {spread:.4f}, Vol24h: {v24h:,.0f}, VCrec: {volumen_creciente}")
+        logging.info(f"[SCORE] {par} | {score}/5 -> Imp: {impulso:.4f}, Mom: {momentum:.4f}, Spr: {spread:.4f}")
 
         if score >= SCORE_MINIMO:
-            logging.info(f"[SEÑAL DETECTADA] {par} ✅")
+            logging.info(f"[SEÑAL] {par} ✅")
             return {"par": par, "precio": c3, "valido": True}
         else:
-            logging.info(f"[DESCARTADO] {par} ❌ Score insuficiente")
             pares_descartados[par] = datetime.now()
             return {"par": par, "valido": False}
 
     except Exception as e:
-        logging.error(f"[ANALISIS] Error en {par}: {e}")
+        if par not in pares_descartados:  # Registrar solo la primera ocurrencia
+            logging.warning(f"[{par}] Error crítico: {str(e)}")
         pares_descartados[par] = datetime.now()
         return {"par": par, "valido": False}
 
@@ -230,18 +224,15 @@ async def ciclo_principal():
     while bot_activo:
         async with lock:
             try:
-                # Actualizar pares cada 5 minutos
+                # Actualizar lista de pares cada 5 minutos
                 if (datetime.now() - ultimo_update).seconds > ACTUALIZACION_PARES:
                     nuevos_pares = await actualizar_pares_volumen()
                     if nuevos_pares:
                         pares_activos = nuevos_pares
                         ultimo_update = datetime.now()
                         logging.info(f"🔄 Pares actualizados: {', '.join(pares_activos)}")
-                    else:
-                        logging.warning("⚠️ No se pudieron actualizar los pares")
 
                 if not pares_activos:
-                    logging.info("🔄 No hay pares disponibles para analizar")
                     await asyncio.sleep(30)
                     continue
 
@@ -314,9 +305,6 @@ async def monitorear_operacion(op):
     max_precio = op['entrada']
     while op in operaciones and bot_activo:
         try:
-            if not bot_activo:
-                break
-
             ticker = await asyncio.to_thread(market.get_ticker, op['par'])
             actual = float(ticker['price'])
             max_precio = max(max_precio, actual)
@@ -327,10 +315,11 @@ async def monitorear_operacion(op):
             op['actual'] = actual
             op['ganancia'] = ganancia_neta
             
-            # Condiciones de venta
-            if (actual - op['entrada']) / op['entrada'] >= GANANCIA_OBJ or \
-               (actual - max_precio) / max_precio <= TRAILING_STOP:
-                
+            # Lógica de venta profesional
+            take_profit = (actual - op['entrada']) / op['entrada'] >= GANANCIA_OBJ
+            stop_loss = (actual - max_precio) / max_precio <= TRAILING_STOP
+            
+            if take_profit or stop_loss:
                 await asyncio.to_thread(
                     trade.create_market_order,
                     symbol=op['par'],
