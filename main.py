@@ -165,6 +165,7 @@ def analizar(par):
         velas = market.get_kline(symbol=par, kline_type="1min", limit=3)
         
         cierres = [float(v[2]) for v in velas if len(v) > 2]
+        volumenes = [float(v[5]) for v in velas if len(v) > 5]  # Volumen por vela
         
         if len(cierres) != 3:
             logging.warning(f"[Descartado] {par} | Velas inválidas o incompletas")
@@ -173,34 +174,43 @@ def analizar(par):
         logging.info(f"[CIERRES] {par} | 1m: {cierres[0]:.6f} | 2m: {cierres[1]:.6f} | 3m: {cierres[2]:.6f}")
         
         c1, c2, c3 = cierres
-        
-        # Filtro temporalmente desactivado
-        # if not (c1 < c2 < c3):
-        #     logging.info(f"[Descartado] {par} | Velas no alcistas: {c1:.6f} < {c2:.6f} < {c3:.6f}")
-        #     return {"par": par, "valido": False}
-        
-        momentum = (c3 - c1) / c1
-        if momentum <= 0:
-            logging.info(f"[Descartado] {par} | Momentum insuficiente: {momentum:.4%}")
-            return {"par": par, "valido": False}
+        v1, v2, v3 = volumenes if len(volumenes) >= 3 else [0, 0, 0]
 
-        ultimo = c3
-        promedio = sum(cierres) / 3
-        spread = abs(ultimo - promedio) / promedio
-        
-        volumen = float(market.get_24h_stats(par)["volValue"])
-        impulso = (c3 - c2) / c2
-
+        # Sistema de scoring de 5 puntos
         score = 0
-        if volumen > 500000: score += 1
-        if impulso > 0.001: score += 1
-        if spread < 0.02: score += 1
+        
+        # 1. Impulso inmediato (últimos 2 cierres)
+        impulso = (c3 - c2) / c2
+        if impulso > 0.0005:
+            score += 1
+        
+        # 2. Momentum en 3 velas
+        momentum = (c3 - c1) / c1
+        if momentum > 0.0005:
+            score += 1
+        
+        # 3. Spread de precio
+        promedio = sum(cierres) / 3
+        spread = abs(c3 - promedio) / promedio
+        if spread < 0.03:
+            score += 1
+        
+        # 4. Volumen 24h
+        volumen_24h = float(market.get_24h_stats(par)["volValue"])
+        if volumen_24h > 100000:
+            score += 1
+        
+        # 5. Volumen creciente en velas
+        if v3 > v2 and v2 > v1:
+            score += 1
 
-        if score >= 1:
-            logging.info(f"[Análisis] {par} | Precio: {ultimo:.6f} | Vol: {volumen:.0f} | Imp: {impulso:.4f} | Spr: {spread:.4f} | Score: {score}/3")
-            return {"par": par, "precio": ultimo, "valido": True}
+        if score >= 2:
+            logging.info(f"[SEÑAL DETECTADA] {par} | SCORE: {score}/5 | Entrada posible...")
+            logging.info(f"[Análisis] {par} | Precio: {c3:.6f} | Vol24h: {volumen_24h:.0f} | Imp: {impulso:.4f} | Mom: {momentum:.4f} | Spr: {spread:.4f}")
+            return {"par": par, "precio": c3, "valido": True}
         else:
-            logging.info(f"[Descartado] {par} | Score: {score}/3 (V:{volumen:.0f}, I:{impulso:.4f}, S:{spread:.4f})")
+            logging.info(f"[Descartado] {par} | Score insuficiente: {score}/5")
+            return {"par": par, "valido": False}
 
     except Exception as e:
         logging.error(f"[Análisis] {par}: {e}")
