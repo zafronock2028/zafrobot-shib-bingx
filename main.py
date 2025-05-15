@@ -161,32 +161,40 @@ def analizar(par):
         logging.info(f"\n[ANÁLISIS INICIO] {par}")
         
         try:
-            # Obtener 4 velas y descartar la última incompleta
-            velas = market.get_kline(symbol=par, kline_type="1min", limit=4)
-            velas = velas[:-1]  # Conservar solo las 3 velas cerradas
+            velas = market.get_kline(symbol=par, kline_type="1min", limit=3)
+            if len(velas) != 3:
+                logging.warning(f"[DESCARTADO] {par} | Velas insuficientes")
+                pares_descartados.add(par)
+                return {"par": par, "valido": False}
+
             cierres = [float(v[2]) for v in velas if len(v) > 2]
             volumenes = [float(v[5]) for v in velas if len(v) > 5]
+            
+            if len(cierres) != 3 or len(volumenes) != 3:
+                logging.warning(f"[DESCARTADO] {par} | Estructura de velas inválida")
+                pares_descartados.add(par)
+                return {"par": par, "valido": False}
+
+            c1, c2, c3 = cierres
+            v1, v2, v3 = volumenes
         except Exception as e:
             logging.error(f"[ERROR VELAS] {par}: {str(e)}")
             pares_descartados.add(par)
             return {"par": par, "valido": False}
 
-        if len(velas) < 3:
-            logging.warning(f"[DESCARTADO] {par} | No se pudieron obtener 3 velas cerradas")
-            pares_descartados.add(par)
-            return {"par": par, "valido": False}
-        
-        c1, c2, c3 = cierres
-        v24h = float(market.get_24h_stats(par)["volValue"])
-        
+        try:
+            v24h = float(market.get_24h_stats(par)["volValue"])
+        except:
+            v24h = 0
+
         logging.info(f"[CIERRES] {par} | 1m: {c1:.6f} | 2m: {c2:.6f} | 3m: {c3:.6f}")
-        logging.info(f"[VOLUMEN] {par} | 24h: {v24h:,.0f}")
+        logging.info(f"[VOLUMEN] {par} | 24h: {v24h:,.0f} | Velas: {v3:,.2f} > {v2:,.2f} > {v1:,.2f}")
         
         momentum = (c3 - c1) / c1
         impulso = (c3 - c2) / c2
         promedio = sum(cierres) / 3
         spread = abs(c3 - promedio) / promedio
-        volumen_creciente = len(volumenes) >= 3 and volumenes[2] > volumenes[1] > volumenes[0]
+        volumen_creciente = v3 > v2 > v1
 
         score = 0
         score += 1 if impulso > 0.0005 else 0
@@ -195,13 +203,13 @@ def analizar(par):
         score += 1 if v24h > 100000 else 0
         score += 1 if volumen_creciente else 0
 
-        logging.info(f"[SCORE] {par} | {score}/5 (Impulso: {impulso:.4%}, Momentum: {momentum:.4%}, Spread: {spread:.4%})")
+        logging.info(f"[SCORE] {par} | {score}/5 (Imp: {impulso:.2%}, Mom: {momentum:.2%}, Spr: {spread:.2%})")
 
         if score >= score_minimo:
             logging.info(f"[SEÑAL DETECTADA] {par} | SCORE: {score}/5")
             return {"par": par, "precio": c3, "valido": True}
         else:
-            logging.info(f"[DESCARTADO] {par} | Razón: Score insuficiente")
+            logging.info(f"[DESCARTADO] {par} | Score insuficiente")
             return {"par": par, "valido": False}
 
     except Exception as e:
