@@ -151,7 +151,7 @@ def corregir_cantidad(usdt, precio, par):
     step = Decimal(str(step_size.get(par, 0.0001)))
     cantidad = Decimal(str(usdt)) / Decimal(str(precio))
     cantidad_corr = (cantidad // step) * step
-    return str(cantidad_corr.quantize(step, rounding=ROUND_DOWN))  # Corrección aplicada aquí
+    return str(cantidad_corr.quantize(step, rounding=ROUND_DOWN))
 
 def analizar(par):
     try:
@@ -161,7 +161,9 @@ def analizar(par):
         logging.info(f"\n[ANÁLISIS INICIO] {par}")
         
         try:
-            velas = market.get_kline(symbol=par, kline_type="1min", limit=3)
+            # Obtener 4 velas y descartar la última incompleta
+            velas = market.get_kline(symbol=par, kline_type="1min", limit=4)
+            velas = velas[:-1]  # Conservar solo las 3 velas cerradas
             cierres = [float(v[2]) for v in velas if len(v) > 2]
             volumenes = [float(v[5]) for v in velas if len(v) > 5]
         except Exception as e:
@@ -169,8 +171,8 @@ def analizar(par):
             pares_descartados.add(par)
             return {"par": par, "valido": False}
 
-        if len(cierres) != 3:
-            logging.warning(f"[DESCARTADO] {par} | Razón: Velas incompletas")
+        if len(velas) < 3:
+            logging.warning(f"[DESCARTADO] {par} | No se pudieron obtener 3 velas cerradas")
             pares_descartados.add(par)
             return {"par": par, "valido": False}
         
