@@ -160,7 +160,11 @@ def corregir_cantidad(usdt, precio, par):
 
 def analizar(par):
     try:
+        logging.info(f"[ANALIZANDO] {par}")  # Nuevo log de inicio
+        
         velas = market.get_kline(symbol=par, kline_type="1min", limit=3)
+        logging.info(f"[VELAS] {par} | {velas}")  # Log de velas crudas
+        
         cierres = [float(v[2]) for v in velas if len(v) > 2]
 
         if len(cierres) != 3:
@@ -169,12 +173,13 @@ def analizar(par):
         
         c1, c2, c3 = cierres
         
-        if not (c1 < c2 < c3):
-            logging.info(f"[Descartado] {par} | Velas no alcistas: {c1:.6f} < {c2:.6f} < {c3:.6f}")
-            return {"par": par, "valido": False}
+        # Filtro temporalmente desactivado
+        # if not (c1 < c2 < c3):
+        #     logging.info(f"[Descartado] {par} | Velas no alcistas: {c1:.6f} < {c2:.6f} < {c3:.6f}")
+        #     return {"par": par, "valido": False}
         
         momentum = (c3 - c1) / c1
-        if momentum <= 0.001:
+        if momentum <= 0:  # Cambiado de 0.001 a 0
             logging.info(f"[Descartado] {par} | Momentum insuficiente: {momentum:.4%}")
             return {"par": par, "valido": False}
 
@@ -187,10 +192,10 @@ def analizar(par):
 
         score = 0
         if volumen > 500000: score += 1
-        if impulso > 0.001: score += 1
+        if impulso > 0.001: score += 1  # Mantenemos este umbral para el score
         if spread < 0.02: score += 1
 
-        if score >= 2:
+        if score >= 1:  # Cambiado de 2 a 1 para testing
             logging.info(f"[Análisis] {par} | Precio: {ultimo:.6f} | Vol: {volumen:.0f} | Imp: {impulso:.4f} | Spr: {spread:.4f} | Score: {score}/3")
             return {"par": par, "precio": ultimo, "valido": True}
         else:
