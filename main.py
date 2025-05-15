@@ -40,7 +40,7 @@ espera_reentrada = 600
 ganancia_obj = 0.004
 trailing_stop = -0.007
 min_orden = 2.5
-score_minimo = 2  # Umbral ajustable
+score_minimo = 2
 
 step_size = {
     "SUI-USDT": 0.1, "TRUMP-USDT": 0.01, "OM-USDT": 0.01, "ENA-USDT": 0.01,
@@ -76,7 +76,7 @@ async def actualizar_pares_volumen():
                     continue
 
         usdt_pares.sort(key=lambda x: x['volumen'], reverse=True)
-        return [p['symbol'] for p in usdt_pares[:25]]  # Top 25 pares
+        return [p['symbol'] for p in usdt_pares[:25]]
     
     except Exception as e:
         logging.error(f"Error actualizando pares: {e}")
@@ -151,7 +151,7 @@ def corregir_cantidad(usdt, precio, par):
     step = Decimal(str(step_size.get(par, 0.0001)))
     cantidad = Decimal(str(usdt)) / Decimal(str(precio))
     cantidad_corr = (cantidad // step) * step
-    return str(cantidad_corr.quantize(step, rounding=ROUND_DOWN)
+    return str(cantidad_corr.quantize(step, rounding=ROUND_DOWN))  # Corrección aplicada aquí
 
 def analizar(par):
     try:
@@ -177,24 +177,21 @@ def analizar(par):
         c1, c2, c3 = cierres
         v24h = float(market.get_24h_stats(par)["volValue"])
         
-        # Logs detallados
         logging.info(f"[CIERRES] {par} | 1m: {c1:.6f} | 2m: {c2:.6f} | 3m: {c3:.6f}")
         logging.info(f"[VOLUMEN] {par} | 24h: {v24h:,.0f}")
         
-        # Cálculos técnicos
         momentum = (c3 - c1) / c1
         impulso = (c3 - c2) / c2
         promedio = sum(cierres) / 3
         spread = abs(c3 - promedio) / promedio
         volumen_creciente = len(volumenes) >= 3 and volumenes[2] > volumenes[1] > volumenes[0]
 
-        # Sistema de scoring (5 factores)
         score = 0
-        score += 1 if impulso > 0.0005 else 0  # +1 impulso
-        score += 1 if momentum > 0.0005 else 0   # +1 momentum
-        score += 1 if spread < 0.03 else 0       # +1 spread
-        score += 1 if v24h > 100000 else 0       # +1 volumen 24h
-        score += 1 if volumen_creciente else 0   # +1 volumen creciente
+        score += 1 if impulso > 0.0005 else 0
+        score += 1 if momentum > 0.0005 else 0
+        score += 1 if spread < 0.03 else 0
+        score += 1 if v24h > 100000 else 0
+        score += 1 if volumen_creciente else 0
 
         logging.info(f"[SCORE] {par} | {score}/5 (Impulso: {impulso:.4%}, Momentum: {momentum:.4%}, Spread: {spread:.4%})")
 
